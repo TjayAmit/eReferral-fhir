@@ -85,6 +85,16 @@ export function setStoredServerId(id: string): void {
   window.localStorage.setItem("fhir-server-id", id);
 }
 
+export function getStoredUseDemoData(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem("use-demo-data") === "true";
+}
+
+export function setStoredUseDemoData(value: boolean): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem("use-demo-data", String(value));
+}
+
 export function getStoredFhirBaseUrl(): string {
   const id = getStoredServerId();
   const server = getServerById(id) || getServerById(DEFAULT_FHIR_SERVER_ID);

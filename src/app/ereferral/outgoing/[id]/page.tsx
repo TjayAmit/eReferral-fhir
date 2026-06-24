@@ -53,7 +53,7 @@ export default function ReferralDetailPage() {
       <AppPageHeader
         items={[
           { label: "Home", href: "/" },
-          { label: "Requested Referrals", href: "/referrals/outgoing" },
+          { label: "Requested Referrals", href: "/ereferral/outgoing" },
           { label: refId },
         ]}
         title={`Referral: ${refId}`}
@@ -65,7 +65,8 @@ export default function ReferralDetailPage() {
       {sr && (
         <ReferralDetailView
           sr={sr}
-          onBack={() => router.push("/referrals/outgoing")}
+          onBack={() => router.push("/ereferral/outgoing")}
+          showActions={false}
         />
       )}
     </>

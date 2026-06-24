@@ -1,13 +1,14 @@
 "use client";
 
 import AppPageHeader from "@/components/AppPageHeader";
+import ToggleSwitch from "@/components/ToggleSwitch";
 import { useAuth } from "@/lib/auth";
 import { useSettings } from "@/lib/settings-context";
 import { buildFhirBaseUrl, FHIR_SERVERS, getServerById } from "@/lib/settings";
 import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
-  const { serverId, setServerId } = useSettings();
+  const { serverId, setServerId, useDemoData, setUseDemoData } = useSettings();
   const { user } = useAuth();
   const [selected, setSelected] = useState(serverId);
   const [saved, setSaved] = useState(false);
@@ -81,6 +82,22 @@ export default function SettingsPage() {
             Save settings
           </button>
           {saved && <span className="ok">Saved.</span>}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 18 }}>
+        <h2>Data source</h2>
+        <p className="muted">
+          When enabled, the application will load and display pre-built demo patient data instead of querying the live FHIR server.
+        </p>
+
+        <div className="field">
+          <ToggleSwitch
+            id="useDemoData"
+            checked={useDemoData}
+            onChange={setUseDemoData}
+            label="Use Demo Data"
+          />
         </div>
       </div>
 

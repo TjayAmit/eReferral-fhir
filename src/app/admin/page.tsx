@@ -29,7 +29,7 @@ export default function AdminPage() {
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Use Case 1</h2>
           <p className="muted">Submit an eReferral transaction Bundle.</p>
-          <Link href="/submit"><button>Open Submit</button></Link>
+          <Link href="/ereferral/submit"><button>Open Submit</button></Link>
         </div>
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Use Case 2</h2>
@@ -51,14 +51,19 @@ export default function AdminPage() {
       <h2>Directory</h2>
       <div className="grid two">
         <div className="card">
+          <h2 style={{ marginTop: 0 }}>Patients (Triage)</h2>
+          <p className="muted">Register patient demographics & next of kin; assign to an organization.</p>
+          <Link href="/clinical/triage"><button>Open Patients</button></Link>
+        </div>
+        <div className="card">
           <h2 style={{ marginTop: 0 }}>Practitioners</h2>
           <p className="muted">View and search registered practitioners.</p>
-          <Link href="/admin/practitioners"><button>Open Practitioners</button></Link>
+          <Link href="/doh/practitioners"><button>Open Practitioners</button></Link>
         </div>
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Organizations</h2>
           <p className="muted">View and search registered facilities.</p>
-          <Link href="/admin/organizations"><button>Open Organizations</button></Link>
+          <Link href="/doh/organizations"><button>Open Organizations</button></Link>
         </div>
       </div>
 

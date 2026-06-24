@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { submitTransaction, FhirError } from '@/lib/fhir';
+import { roleCoding, DEFAULT_ROLE_CODE } from '@/lib/practitioner-roles';
 
 export async function POST(request: NextRequest) {
   try {
@@ -77,13 +78,7 @@ export async function POST(request: NextRequest) {
             organization: {
               reference: `Organization/${body.organizationId}`
             },
-            code: [{
-              coding: [{
-                system: "https://www.fhir.doh.gov.ph/pheref/CodeSystem/practitioner-role",
-                code: "physician",
-                display: "Physician"
-              }]
-            }],
+            code: [{ coding: [roleCoding(DEFAULT_ROLE_CODE)] }],
           }
         }
       ]

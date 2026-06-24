@@ -7,7 +7,9 @@ import {
   FhirServer,
   getServerById,
   getStoredServerId,
+  getStoredUseDemoData,
   setStoredServerId,
+  setStoredUseDemoData,
 } from "./settings";
 
 interface SettingsContextValue {
@@ -15,6 +17,8 @@ interface SettingsContextValue {
   server: FhirServer;
   baseUrl: string;
   setServerId: (id: string) => void;
+  useDemoData: boolean;
+  setUseDemoData: (value: boolean) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -38,11 +42,22 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new StorageEvent("storage"));
   }, []);
 
+  const useDemoData = useSyncExternalStore(
+    subscribe,
+    () => getStoredUseDemoData(),
+    () => false
+  );
+
+  const setUseDemoData = useCallback((value: boolean) => {
+    setStoredUseDemoData(value);
+    window.dispatchEvent(new StorageEvent("storage"));
+  }, []);
+
   const server = getServerById(serverId) || getServerById(DEFAULT_FHIR_SERVER_ID)!;
   const baseUrl = buildFhirBaseUrl(server);
 
   return (
-    <SettingsContext.Provider value={{ serverId, server, baseUrl, setServerId }}>
+    <SettingsContext.Provider value={{ serverId, server, baseUrl, setServerId, useDemoData, setUseDemoData }}>
       {children}
     </SettingsContext.Provider>
   );

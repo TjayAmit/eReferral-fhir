@@ -8,6 +8,8 @@ import Modal from "@/components/Modal";
 import { useAuth } from "@/lib/auth";
 import { useSettings } from "@/lib/settings-context";
 import { humanName } from "@/lib/referral";
+import { ROLE_CODES, DEFAULT_ROLE_CODE, DEFAULT_ROLE_OPTION, roleCoding, roleDisplay, fetchRoleCodes, type RoleOption } from "@/lib/practitioner-roles";
+import { buildPractitioner, buildPractitionerRole } from "@/lib/practitioner-registration";
 
 export default function PractitionersPage() {
   const { user, ready } = useAuth();
@@ -28,7 +30,7 @@ export default function PractitionersPage() {
     familyName: "",
     prcLicense: "",
     organizationId: "",
-    roleCode: "physician" as RoleCode,
+    role: DEFAULT_ROLE_OPTION,
     email: "",
     password: "",
     active: true,
@@ -43,11 +45,12 @@ export default function PractitionersPage() {
     familyName: "",
     prcLicense: "",
     organizationId: "",
-    roleCode: "physician" as RoleCode,
+    role: DEFAULT_ROLE_OPTION,
     email: "",
     password: "",
     active: true,
   });
+  const [roleOptions, setRoleOptions] = useState<RoleOption[]>([...ROLE_CODES]);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [editHasUser, setEditHasUser] = useState(false); // true = account exists
@@ -60,6 +63,11 @@ export default function PractitionersPage() {
     if (ready && user?.role === "admin") load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, user, baseUrl]);
+
+  useEffect(() => {
+    if (!baseUrl) return;
+    fetchRoleCodes(baseUrl).then(setRoleOptions).catch(() => {});
+  }, [baseUrl]);
 
   useEffect(() => {
     setPage(1);
@@ -126,30 +134,15 @@ export default function PractitionersPage() {
     setCreateLoading(true);
     setCreateError(null);
     try {
-      const identifiers = [];
-      if (createForm.prcLicense) {
-        identifiers.push({
-          system: "https://fhir.doh.gov.ph/phcore/Identifier/doh-prc-license-number",
-          value: createForm.prcLicense,
-        });
-      }
-
-      const practitioner = {
-        resourceType: "Practitioner",
-        identifier: identifiers,
+      const form = {
+        givenName: createForm.givenName,
+        familyName: createForm.familyName,
+        prcLicense: createForm.prcLicense,
+        organizationId: createForm.organizationId,
+        role: createForm.role,
         active: createForm.active,
-        name: [{
-          use: "official",
-          family: createForm.familyName,
-          given: [createForm.givenName],
-          prefix: ["Dr."],
-        }],
-        telecom: [{
-          system: "phone",
-          value: "+63-917-111-2233",
-          use: "work"
-        }],
       };
+      const practitioner = buildPractitioner(form);
 
       const response = await fetch("/api/practitioner", {
         method: "POST",
@@ -166,24 +159,7 @@ export default function PractitionersPage() {
       const createdPractitioner = data;
 
       if (createdPractitioner && createdPractitioner.id) {
-        const roleId = `ROLE-${createForm.prcLicense || Date.now()}`;
-        const practitionerRole = {
-          resourceType: "PractitionerRole",
-          identifier: [{
-            system: "https://fhir.doh.gov.ph/pheref/Identifier/practitioner-role-id",
-            value: roleId,
-          }],
-          active: createForm.active,
-          practitioner: { reference: `Practitioner/${createdPractitioner.id}` },
-          organization: { reference: `Organization/${createForm.organizationId}` },
-          code: [{
-            coding: [{
-              system: "https://www.fhir.doh.gov.ph/pheref/CodeSystem/practitioner-role",
-              code: createForm.roleCode,
-              display: roleDisplay(createForm.roleCode),
-            }]
-          }],
-        };
+        const practitionerRole = buildPractitionerRole(form, createdPractitioner.id);
 
         const roleResponse = await fetch("/api/practitioner-role", {
           method: "POST",
@@ -213,7 +189,7 @@ export default function PractitionersPage() {
         }
       }
 
-      setCreateForm({ givenName: "", familyName: "", prcLicense: "", organizationId: "", roleCode: "physician", email: "", password: "", active: true });
+      setCreateForm({ givenName: "", familyName: "", prcLicense: "", organizationId: "", role: DEFAULT_ROLE_OPTION, email: "", password: "", active: true });
       setShowCreateForm(false);
       load();
     } catch (e) {
@@ -226,7 +202,8 @@ export default function PractitionersPage() {
   async function startEdit(practitioner: any) {
     const existingRole = roles.find(r => r.practitioner?.reference?.includes(practitioner.id));
     const currentOrgId = existingRole?.organization?.reference?.split("/").pop() || "";
-    const currentRoleCode = (existingRole?.code?.[0]?.coding?.[0]?.code as RoleCode) || "physician";
+    const currentRoleCode = existingRole?.code?.[0]?.coding?.[0]?.code || DEFAULT_ROLE_CODE;
+    const currentRole = roleOptions.find((r) => r.code === currentRoleCode) ?? DEFAULT_ROLE_OPTION;
 
     // Fetch user account to get current email
     let currentEmail = "";
@@ -253,7 +230,7 @@ export default function PractitionersPage() {
       familyName: practitioner.name?.[0]?.family || "",
       prcLicense: idVal(practitioner, "prc") || "",
       organizationId: currentOrgId,
-      roleCode: currentRoleCode,
+      role: currentRole,
       email: currentEmail,
       password: "",
       active: practitioner.active !== false,
@@ -316,13 +293,7 @@ export default function PractitionersPage() {
           ...existingRole,
           active: editForm.active,
           organization: { reference: `Organization/${editForm.organizationId}` },
-          code: [{
-            coding: [{
-              system: "https://www.fhir.doh.gov.ph/pheref/CodeSystem/practitioner-role",
-              code: editForm.roleCode,
-              display: roleDisplay(editForm.roleCode),
-            }]
-          }],
+          code: [{ coding: [roleCoding(editForm.role)] }],
         };
         const roleResponse = await fetch("/api/practitioner-role", {
           method: "PUT",
@@ -344,13 +315,7 @@ export default function PractitionersPage() {
           active: editForm.active,
           practitioner: { reference: `Practitioner/${editingId}` },
           organization: { reference: `Organization/${editForm.organizationId}` },
-          code: [{
-            coding: [{
-              system: "https://www.fhir.doh.gov.ph/pheref/CodeSystem/practitioner-role",
-              code: editForm.roleCode,
-              display: roleDisplay(editForm.roleCode),
-            }]
-          }],
+          code: [{ coding: [roleCoding(editForm.role)] }],
         };
         const roleResponse = await fetch("/api/practitioner-role", {
           method: "POST",
@@ -550,11 +515,11 @@ export default function PractitionersPage() {
           <div className="field">
             <label>Practitioner Role (required)</label>
             <select
-              value={createForm.roleCode}
-              onChange={(e) => setCreateForm({ ...createForm, roleCode: e.target.value as RoleCode })}
+              value={createForm.role.code}
+              onChange={(e) => setCreateForm({ ...createForm, role: roleOptions.find((r) => r.code === e.target.value) ?? DEFAULT_ROLE_OPTION })}
               required
             >
-              {ROLE_CODES.map((r) => (
+              {roleOptions.map((r) => (
                 <option key={r.code} value={r.code}>{r.display}</option>
               ))}
             </select>
@@ -704,11 +669,11 @@ export default function PractitionersPage() {
                               <div className="field">
                                 <label>Practitioner Role (required)</label>
                                 <select
-                                  value={editForm.roleCode}
-                                  onChange={(e) => setEditForm({ ...editForm, roleCode: e.target.value as RoleCode })}
+                                  value={editForm.role.code}
+                                  onChange={(e) => setEditForm({ ...editForm, role: roleOptions.find((r) => r.code === e.target.value) ?? DEFAULT_ROLE_OPTION })}
                                   required
                                 >
-                                  {ROLE_CODES.map((r) => (
+                                  {roleOptions.map((r) => (
                                     <option key={r.code} value={r.code}>{r.display}</option>
                                   ))}
                                 </select>
@@ -835,18 +800,3 @@ function idVal(res: any, kind: "prc" | "nhfr" | "hcpn"): string | undefined {
   return match?.value;
 }
 
-const ROLE_CODES = [
-  { code: "physician",  display: "Physician" },
-  { code: "nurse",      display: "Nurse" },
-  { code: "midwife",    display: "Midwife" },
-  { code: "navigator",  display: "Referral Navigator" },
-  { code: "medtech",    display: "Medical Technologist" },
-  { code: "pharmacist", display: "Pharmacist" },
-  { code: "dentist",    display: "Dentist" },
-] as const;
-
-type RoleCode = typeof ROLE_CODES[number]["code"];
-
-function roleDisplay(code: string): string {
-  return ROLE_CODES.find(r => r.code === code)?.display ?? code;
-}

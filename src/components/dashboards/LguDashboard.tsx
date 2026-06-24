@@ -135,7 +135,7 @@ export default function LguDashboard() {
 
   const kpis = useMemo(() => {
     if (!rows) return { total: 0, pending: 0, inCare: 0, completed: 0, rate: "—" };
-    const total = rows.srs.length || Object.values(statusCounts).reduce((a, b) => a + b, 0);
+    const total = rows.srs.length;
     const pending = statusCounts.requested + statusCounts.received;
     const inCare = statusCounts.accepted + statusCounts["in-progress"];
     const engaged = statusCounts.accepted + statusCounts["in-progress"] + statusCounts.completed;

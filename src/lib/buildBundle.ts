@@ -63,6 +63,7 @@ const SIGNATURE_DATA = "dGVzdHNpZ25hdHVyZWJhc2U2NA==";
 // ---------------------------------------------------------------------------
 export type ClinicalInput = {
   referralId: string;
+  patientId?: string;             // when set, reference existing Patient/<id> (no re-create)
   authoredOn: string;             // datetime-local (YYYY-MM-DDTHH:MM)
   referralCategory: string;       // emergency | outpatient  -> SR.category (REF-14)
   serviceType: { code: string; display: string }; // SR.reasonCode coding (REF-16)
@@ -204,7 +205,9 @@ export function buildReferralBundle(
   const receivingPractName = humanName(receiving.practitioner?.name);
 
   // urn:uuid fullUrls for the NEW resources this referral creates.
-  const patientRef = uuid();
+  // When an existing patient is selected, reference it by literal id and do not
+  // re-create/upsert the Patient (only the new clinical + referral resources are sent).
+  const patientRef = i.patientId ? `Patient/${i.patientId}` : uuid();
   const srRef = uuid();
   const encounterRef = uuid();
   const chiefRef = uuid();
@@ -217,42 +220,45 @@ export function buildReferralBundle(
   const entries: any[] = [];
 
   // ── 1. Patient (PUT by PhilSys, fallback PhilHealth) ─────────────────────
-  const patientIdentifiers = [
-    ...(i.patient.philhealth ? [{ system: SYS.philhealth, value: i.patient.philhealth }] : []),
-    ...(i.patient.philsys ? [{ system: SYS.philsys, value: i.patient.philsys }] : []),
-  ];
-  const patientName = [...names(i.patient.given), i.patient.family].filter(Boolean).join(" ");
-  const patient: any = {
-    resourceType: "Patient",
-    meta: { profile: [PROFILE.patient] },
-    language: "en",
-    identifier: patientIdentifiers,
-    active: true,
-    name: [{ use: "official", family: i.patient.family, given: names(i.patient.given) }],
-    telecom: i.patient.phone ? [{ system: "phone", value: i.patient.phone, use: "mobile" }] : undefined,
-    gender: i.patient.gender,
-    birthDate: i.patient.birthDate,
-    address: [{
-      use: "home",
-      line: i.patient.line ? [i.patient.line] : undefined,
-      city: i.patient.city || undefined,
-      postalCode: i.patient.postalCode || undefined,
-      country: "PH",
-    }],
-    contact: (i.patient.contactFamily || i.patient.contactGiven) ? [{
-      relationship: [{ coding: [{ system: CS.roleCode, code: i.patient.contactRelCode, display: i.patient.contactRelDisplay }] }],
-      name: { use: "official", family: i.patient.contactFamily, given: i.patient.contactGiven ? names(i.patient.contactGiven) : undefined },
-    }] : undefined,
-  };
-  patient.text = narrative("Patient", undefined, [
-    `Name: ${esc(patientName)}`,
-    `Gender: ${esc(i.patient.gender)} · DoB: ${esc(i.patient.birthDate)}`,
-    i.patient.philhealth ? `PhilHealth: ${esc(i.patient.philhealth)}` : "",
-  ]);
-  const patientPut = i.patient.philsys
-    ? `Patient?identifier=${SYS.philsys}|${i.patient.philsys}`
-    : `Patient?identifier=${SYS.philhealth}|${i.patient.philhealth}`;
-  entries.push(putEntry(patientRef, patient, patientPut));
+  // Skipped when an existing patient was selected — it's referenced by id instead.
+  if (!i.patientId) {
+    const patientIdentifiers = [
+      ...(i.patient.philhealth ? [{ system: SYS.philhealth, value: i.patient.philhealth }] : []),
+      ...(i.patient.philsys ? [{ system: SYS.philsys, value: i.patient.philsys }] : []),
+    ];
+    const patientName = [...names(i.patient.given), i.patient.family].filter(Boolean).join(" ");
+    const patient: any = {
+      resourceType: "Patient",
+      meta: { profile: [PROFILE.patient] },
+      language: "en",
+      identifier: patientIdentifiers,
+      active: true,
+      name: [{ use: "official", family: i.patient.family, given: names(i.patient.given) }],
+      telecom: i.patient.phone ? [{ system: "phone", value: i.patient.phone, use: "mobile" }] : undefined,
+      gender: i.patient.gender,
+      birthDate: i.patient.birthDate,
+      address: [{
+        use: "home",
+        line: i.patient.line ? [i.patient.line] : undefined,
+        city: i.patient.city || undefined,
+        postalCode: i.patient.postalCode || undefined,
+        country: "PH",
+      }],
+      contact: (i.patient.contactFamily || i.patient.contactGiven) ? [{
+        relationship: [{ coding: [{ system: CS.roleCode, code: i.patient.contactRelCode, display: i.patient.contactRelDisplay }] }],
+        name: { use: "official", family: i.patient.contactFamily, given: i.patient.contactGiven ? names(i.patient.contactGiven) : undefined },
+      }] : undefined,
+    };
+    patient.text = narrative("Patient", undefined, [
+      `Name: ${esc(patientName)}`,
+      `Gender: ${esc(i.patient.gender)} · DoB: ${esc(i.patient.birthDate)}`,
+      i.patient.philhealth ? `PhilHealth: ${esc(i.patient.philhealth)}` : "",
+    ]);
+    const patientPut = i.patient.philsys
+      ? `Patient?identifier=${SYS.philsys}|${i.patient.philsys}`
+      : `Patient?identifier=${SYS.philhealth}|${i.patient.philhealth}`;
+    entries.push(putEntry(patientRef, patient, patientPut));
+  }
 
   // Practitioner, Organizations and PractitionerRoles already exist on the server;
   // they are referenced by literal id (see refs above) and are NOT re-submitted.

@@ -12,7 +12,6 @@ export const SYS = {
   prc: "https://fhir.doh.gov.ph/phcore/Identifier/doh-prc-license-number",
   philhealth: "http://philhealth.gov.ph/fhir/Identifier/philhealth-id",
   philsys: "http://philsys.gov.ph/fhir/Identifier/philsys-id",
-  reasonForReferral: "https://www.fhir.doh.gov.ph/pheref/CodeSystem/reason-for-referral-service-type",
   practitionerRole: "https://www.fhir.doh.gov.ph/pheref/CodeSystem/practitioner-role",
   loinc: "http://loinc.org",
   snomed: "http://snomed.info/sct",
@@ -208,8 +207,8 @@ export function buildReferralBundle(i: ReferralInput) {
           intent: "order",
           priority: i.priority, // 1.14 Referral Category
           category: [{ // 1.15 Reason for Referral (service type)
-            coding: [{ system: SYS.reasonForReferral, code: i.reason.code, display: i.reason.display }],
-            text: "Reason for referral (service type)",
+            coding: [{ system: SYS.snomed, code: "73770003", display: "Hospital-based outpatient emergency care center" }],
+            text: "Emergency",
           }],
           subject: { reference: patientRef },
           authoredOn: i.authoredOn, // 1.13

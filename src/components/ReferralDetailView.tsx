@@ -437,8 +437,8 @@ function Section({ title, resource, fhirBadge, count, children }: { title: strin
 // ── Referral detail view ────────────────────────────────────────────────────
 
 export default function ReferralDetailView({
-  sr, task: taskProp, onBack, onChanged,
-}: { sr: any; task?: any | null; onBack?: () => void; onChanged?: (t: any) => void }) {
+  sr, task: taskProp, onBack, onChanged, showActions = true,
+}: { sr: any; task?: any | null; onBack?: () => void; onChanged?: (t: any) => void; showActions?: boolean }) {
   const [detail, setDetail] = useState<DetailData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -470,13 +470,17 @@ export default function ReferralDetailView({
   async function retrieve() {
     setLoading(true); setError(null);
     try {
-      // Step 1: Fetch ServiceRequest with basic includes. The requester/performer
-      // may be PractitionerRoles, so iterate-include their Organization too.
+      // Step 1: Fetch the ServiceRequest together with the resources it directly
+      // references — subject (Patient), requester (Referring), performer (Receiving
+      // Organization) and encounter. The requester/performer may be PractitionerRoles,
+      // so iterate-include their Organization and Practitioner too. Task and Provenance
+      // come along via rev/forward includes.
       const bundle = await fhirGet(
         `ServiceRequest?_id=${sr.id}` +
         `&_include=ServiceRequest:subject` +
         `&_include=ServiceRequest:requester` +
         `&_include=ServiceRequest:performer` +
+        `&_include=ServiceRequest:encounter` +
         `&_include:iterate=PractitionerRole:organization` +
         `&_include:iterate=PractitionerRole:practitioner` +
         `&_revinclude=Task:focus` +
@@ -526,53 +530,49 @@ export default function ReferralDetailView({
       const tasks = all.filter((r) => r.resourceType === "Task");
       const task = latestTask(tasks);
 
-      // Step 2: Fetch encounter (and any Observations the server returns via revinclude)
-      let encounter = null;
-      const obsById = new Map<string, any>();
-      if (sr.encounter?.reference) {
-        const encounterId = sr.encounter.reference.split('/').pop();
-        const encounterBundle = await fhirGet(`Encounter?_id=${encounterId}&_revinclude=Observation:encounter`);
-        encounter = encounterBundle.entry?.find((e: any) => e.resource?.resourceType === "Encounter")?.resource || null;
-        for (const e of encounterBundle.entry || []) {
-          if (e.resource?.resourceType === "Observation") obsById.set(e.resource.id, e.resource);
-        }
-      }
+      // The encounter was included with the ServiceRequest in step 1.
+      const encounter = all.find((r) => r.resourceType === "Encounter") || null;
+      const encounterId = encounter?.id || refId(sr.encounter?.reference || "");
 
-      // Step 2b: Fetch Observations by patient (reliable — vitals are linked by subject
-      // even when the server does not honour the Encounter:encounter _revinclude).
-      if (patient) {
-        const obsBundle = await fhirGet(`Observation?subject=Patient/${patient.id}`);
-        for (const e of obsBundle.entry || []) {
-          if (e.resource?.resourceType === "Observation") obsById.set(e.resource.id, e.resource);
-        }
-      }
-      const observations = Array.from(obsById.values());
+      const collect = (b: any, rt: string): any[] =>
+        (b?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === rt);
 
-      // Step 3: Fetch Conditions by patient
+      // Step 2: Use the Encounter to gather everything recorded during the visit —
+      // Observations, Conditions, Procedures and DiagnosticReports are linked to it.
+      let observations: any[] = [];
       let conditions: any[] = [];
-      if (patient) {
-        const conditionBundle = await fhirGet(`Condition?subject=Patient/${patient.id}`);
-        conditions = (conditionBundle.entry || [])
-          .map((e: any) => e.resource)
-          .filter((r: any) => r?.resourceType === "Condition");
-      }
-
-      // Step 4: Fetch Procedures by patient
       let procedures: any[] = [];
-      if (patient) {
-        const procBundle = await fhirGet(`Procedure?subject=Patient/${patient.id}`);
-        procedures = (procBundle.entry || [])
-          .map((e: any) => e.resource)
-          .filter((r: any) => r?.resourceType === "Procedure");
+      let diagnosticReports: any[] = [];
+      if (encounterId) {
+        const enc = `Encounter/${encounterId}`;
+        const [obsB, condB, procB, drB] = await Promise.all([
+          fhirGet(`Observation?encounter=${enc}&_count=100`),
+          fhirGet(`Condition?encounter=${enc}&_count=100`),
+          fhirGet(`Procedure?encounter=${enc}&_count=100`),
+          fhirGet(`DiagnosticReport?encounter=${enc}&_count=100`),
+        ]);
+        observations = collect(obsB, "Observation");
+        conditions = collect(condB, "Condition");
+        procedures = collect(procB, "Procedure");
+        diagnosticReports = collect(drB, "DiagnosticReport");
       }
 
-      // Step 5: Fetch DiagnosticReports by patient
-      let diagnosticReports: any[] = [];
-      if (patient) {
-        const drBundle = await fhirGet(`DiagnosticReport?subject=Patient/${patient.id}`);
-        diagnosticReports = (drBundle.entry || [])
-          .map((e: any) => e.resource)
-          .filter((r: any) => r?.resourceType === "DiagnosticReport");
+      // Fallback: older referrals whose clinical resources aren't linked to an
+      // Encounter — fetch by Patient subject so the view still renders.
+      const nothingFromEncounter =
+        observations.length + conditions.length + procedures.length + diagnosticReports.length === 0;
+      if (patient && (!encounterId || nothingFromEncounter)) {
+        const subj = `Patient/${patient.id}`;
+        const [obsB, condB, procB, drB] = await Promise.all([
+          fhirGet(`Observation?subject=${subj}&_count=100`),
+          fhirGet(`Condition?subject=${subj}&_count=100`),
+          fhirGet(`Procedure?subject=${subj}&_count=100`),
+          fhirGet(`DiagnosticReport?subject=${subj}&_count=100`),
+        ]);
+        if (observations.length === 0) observations = collect(obsB, "Observation");
+        if (conditions.length === 0) conditions = collect(condB, "Condition");
+        if (procedures.length === 0) procedures = collect(procB, "Procedure");
+        if (diagnosticReports.length === 0) diagnosticReports = collect(drB, "DiagnosticReport");
       }
 
       // Receiving side: ServiceRequest.performer = Organization only;
@@ -647,7 +647,7 @@ export default function ReferralDetailView({
             <span className={`badge ${status}`} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999 }}>{status}</span>
           </div>
           <div className="incoming-header-actions">
-            {activeTask && actions.map((a) => (
+            {showActions && activeTask && actions.map((a) => (
               <button
                 key={a.status}
                 className={a.variant === "danger" ? "action-danger" : a.variant === "primary" ? "action-primary" : ""}

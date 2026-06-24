@@ -39,5 +39,19 @@
     "role": "practitioner",
     "practitionerId": "18568",
     "id": "user-1782284248608"
+  },
+  {
+    "email": "johny@mailinator.com",
+    "password": "password",
+    "role": "practitioner",
+    "practitionerId": "19358",
+    "id": "user-1782293418452"
+  },
+  {
+    "email": "timoty@mailinator.com",
+    "password": "password",
+    "role": "practitioner",
+    "practitionerId": "19358",
+    "id": "user-1782294490696"
   }
 ]

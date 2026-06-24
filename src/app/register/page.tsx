@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSettings } from "@/lib/settings-context";
 import { fhirGet, FhirError } from "@/lib/fhir";
+import { roleCoding, DEFAULT_ROLE_OPTION, fetchRoleCodes, type RoleOption } from "@/lib/practitioner-roles";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -31,9 +32,16 @@ export default function RegisterPage() {
   
   const [createdPractitionerId, setCreatedPractitionerId] = useState<string | null>(null);
   const [createdOrganizationId, setCreatedOrganizationId] = useState<string | null>(null);
+  const [role, setRole] = useState<RoleOption>(DEFAULT_ROLE_OPTION);
+  const [roleOptions, setRoleOptions] = useState<RoleOption[]>([DEFAULT_ROLE_OPTION]);
 
   useEffect(() => {
     loadOrganizations();
+  }, [baseUrl]);
+
+  useEffect(() => {
+    if (!baseUrl) return;
+    fetchRoleCodes(baseUrl).then(setRoleOptions).catch(() => {});
   }, [baseUrl]);
 
   async function loadOrganizations() {
@@ -114,13 +122,7 @@ export default function RegisterPage() {
           active: practitionerForm.active,
           practitioner: { reference: `Practitioner/${createdPractitioner.id}` },
           organization: { reference: `Organization/${practitionerForm.organizationId}` },
-          code: [{
-            coding: [{
-              system: "https://www.fhir.doh.gov.ph/pheref/CodeSystem/practitioner-role",
-              code: "physician",
-              display: "Physician"
-            }]
-          }],
+          code: [{ coding: [roleCoding(role)] }],
         };
 
         const roleResponse = await fetch("/api/practitioner-role", {
@@ -243,6 +245,18 @@ export default function RegisterPage() {
                   <option key={org.id} value={org.id}>
                     {org.name}
                   </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Practitioner Role (required)</label>
+              <select
+                value={role.code}
+                onChange={(e) => setRole(roleOptions.find((r) => r.code === e.target.value) ?? DEFAULT_ROLE_OPTION)}
+                required
+              >
+                {roleOptions.map((r) => (
+                  <option key={r.code} value={r.code}>{r.display}</option>
                 ))}
               </select>
             </div>

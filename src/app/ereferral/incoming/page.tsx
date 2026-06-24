@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
@@ -8,6 +8,14 @@ import ReferralDetailView from "@/components/ReferralDetailView";
 import { useAuth } from "@/lib/auth";
 import { fhirGet, FhirError } from "@/lib/fhir";
 import { humanName, latestTask } from "@/lib/referral";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  getPaginationRowModel,
+  flexRender,
+  type SortingState,
+} from "@tanstack/react-table";
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -51,6 +59,7 @@ export default function IncomingReferralsPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [sorting, setSorting] = useState<SortingState>([]);
   const [selected, setSelected] = useState<ReferralItem | null>(null);
   const PAGE_SIZE = 10;
 
@@ -63,6 +72,7 @@ export default function IncomingReferralsPage() {
   }, [ready, orgId]);
 
   useEffect(() => { setPage(1); }, [query, statusFilter]);
+  useEffect(() => { setPage(1); }, [sorting]);
 
   async function load() {
     if (!orgId) return;
@@ -127,9 +137,66 @@ export default function IncomingReferralsPage() {
     return text.includes(query.toLowerCase());
   });
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const columns = useMemo(() => [
+    {
+      id: "referralId",
+      header: "Referral ID",
+      accessorFn: (row: ReferralItem) => row.sr.identifier?.[0]?.value || row.sr.id || "",
+      cell: (info: any) => <code>{info.getValue()}</code>,
+    },
+    {
+      id: "patient",
+      header: "Patient",
+      accessorFn: (row: ReferralItem) => humanName(row.patient?.name) || row.sr.subject?.display || "",
+      cell: (info: any) => info.getValue() || "—",
+    },
+    {
+      id: "reason",
+      header: "Reason",
+      accessorFn: (row: ReferralItem) => row.sr.category?.[0]?.coding?.[0]?.display || row.sr.category?.[0]?.text || "",
+      cell: (info: any) => info.getValue() || "—",
+    },
+    {
+      id: "priority",
+      header: "Priority",
+      accessorFn: (row: ReferralItem) => row.sr.priority || "",
+      cell: (info: any) => info.getValue() || "—",
+    },
+    {
+      id: "status",
+      header: "Status",
+      accessorFn: (row: ReferralItem) => row.task?.status || row.sr.status || "",
+      cell: (info: any) => <span className={`badge ${info.getValue()}`}>{info.getValue() || "—"}</span>,
+    },
+    {
+      id: "date",
+      header: "Date",
+      accessorFn: (row: ReferralItem) => row.sr.authoredOn ? new Date(row.sr.authoredOn).getTime() : 0,
+      cell: (info: any) => info.row.original.sr.authoredOn ? new Date(info.row.original.sr.authoredOn).toLocaleDateString() : "—",
+    },
+  ], []);
+
+  const table = useReactTable({
+    data: filtered,
+    columns,
+    state: {
+      sorting,
+      pagination: {
+        pageIndex: page - 1,
+        pageSize: PAGE_SIZE,
+      },
+    },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    manualPagination: false,
+    manualSorting: false,
+  });
+
+  const currentPage = table.getState().pagination.pageIndex + 1;
+  const totalPages = Math.max(1, table.getPageCount());
+  const pageRows = table.getRowModel().rows;
 
   if (selected) {
     return (
@@ -137,7 +204,7 @@ export default function IncomingReferralsPage() {
         <AppPageHeader
           items={[
             { label: "Home", href: "/" },
-            { label: "Incoming Referrals", href: "/referrals/incoming" },
+            { label: "Incoming Referrals", href: "/ereferral/incoming" },
             { label: selected.sr?.identifier?.[0]?.value || selected.sr?.id },
           ]}
           title={`Referral: ${selected.sr?.identifier?.[0]?.value || selected.sr?.id || "Detail"}`}
@@ -210,30 +277,48 @@ export default function IncomingReferralsPage() {
           <>
             <table className="admin-table">
               <thead>
-                <tr>
-                  <th>Referral ID</th>
-                  <th>Patient</th>
-                  <th>Reason</th>
-                  <th>Priority</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                </tr>
+                {table.getHeaderGroups().map((hg) => (
+                  <tr key={hg.id}>
+                    {hg.headers.map((h) => {
+                      const sort = h.column.getIsSorted();
+                      const canSort = h.column.getCanSort();
+                      return (
+                        <th
+                          key={h.id}
+                          onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
+                          style={canSort ? { cursor: "pointer" } : undefined}
+                          aria-sort={
+                            sort === "asc"
+                              ? "ascending"
+                              : sort === "desc"
+                              ? "descending"
+                              : undefined
+                          }
+                        >
+                          {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
+                          {canSort && (
+                            <span className="sort-indicator" aria-hidden="true">
+                              {sort === "asc" ? " ▲" : sort === "desc" ? " ▼" : "  "}
+                            </span>
+                          )}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                ))}
               </thead>
               <tbody>
-                {pageRows.map(({ sr, task, patient }) => {
-                  const status = task?.status || sr.status || "—";
-                  return (
-                    <tr key={sr.id} className="clickable"
-                      onClick={() => setSelected(items.find((i) => i.sr.id === sr.id) || null)}>
-                      <td><code>{sr.identifier?.[0]?.value || sr.id}</code></td>
-                      <td>{humanName(patient?.name) || sr.subject?.display || "—"}</td>
-                      <td>{sr.category?.[0]?.coding?.[0]?.display || sr.category?.[0]?.text || "—"}</td>
-                      <td>{sr.priority || "—"}</td>
-                      <td><span className={`badge ${status}`}>{status}</span></td>
-                      <td>{sr.authoredOn ? new Date(sr.authoredOn).toLocaleDateString() : "—"}</td>
-                    </tr>
-                  );
-                })}
+                {pageRows.map((row) => (
+                  <tr
+                    key={row.original.sr.id}
+                    className="clickable"
+                    onClick={() => setSelected(items.find((i) => i.sr.id === row.original.sr.id) || null)}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
             <Pagination page={currentPage} totalPages={totalPages} total={filtered.length} onPageChange={setPage} />

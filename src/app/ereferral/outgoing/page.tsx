@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import { useAuth } from "@/lib/auth";
 import { fhirGet, FhirError } from "@/lib/fhir";
 import { humanName } from "@/lib/referral";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  getPaginationRowModel,
+  flexRender,
+  type SortingState,
+} from "@tanstack/react-table";
 
 const STATUSES = ["requested", "received", "accepted", "rejected", "completed"] as const;
 
@@ -42,6 +50,7 @@ export default function OutgoingReferralsPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [sorting, setSorting] = useState<SortingState>([]);
   const PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -54,6 +63,7 @@ export default function OutgoingReferralsPage() {
   }, [ready, user]);
 
   useEffect(() => { setPage(1); }, [query, statusFilter]);
+  useEffect(() => { setPage(1); }, [sorting]);
 
   // Persist the requested-referral fetch: list Tasks requested by this
   // practitioner role, with their ServiceRequest (focus) and Patient included.
@@ -121,9 +131,66 @@ export default function OutgoingReferralsPage() {
     return text.includes(query.toLowerCase());
   });
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const columns = useMemo(() => [
+    {
+      id: "referralId",
+      header: "Referral ID",
+      accessorFn: (row: any) => row.identifier?.[0]?.value || row.id || "",
+      cell: (info: any) => <code>{info.getValue()}</code>,
+    },
+    {
+      id: "patient",
+      header: "Patient",
+      accessorFn: (row: any) => patientName(row),
+      cell: (info: any) => info.getValue(),
+    },
+    {
+      id: "reason",
+      header: "Reason",
+      accessorFn: (row: any) => srReason(getServiceRequest(row)),
+      cell: (info: any) => info.getValue(),
+    },
+    {
+      id: "priority",
+      header: "Priority",
+      accessorFn: (row: any) => row.priority || "",
+      cell: (info: any) => info.getValue() || "—",
+    },
+    {
+      id: "status",
+      header: "Status",
+      accessorFn: (row: any) => row.status || "",
+      cell: (info: any) => <span className={`badge ${info.getValue()}`}>{info.getValue() || "—"}</span>,
+    },
+    {
+      id: "date",
+      header: "Date",
+      accessorFn: (row: any) => row.authoredOn ? new Date(row.authoredOn).getTime() : 0,
+      cell: (info: any) => info.row.original.authoredOn ? new Date(info.row.original.authoredOn).toLocaleDateString() : "—",
+    },
+  ], []);
+
+  const table = useReactTable({
+    data: filtered,
+    columns,
+    state: {
+      sorting,
+      pagination: {
+        pageIndex: page - 1,
+        pageSize: PAGE_SIZE,
+      },
+    },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    manualPagination: false,
+    manualSorting: false,
+  });
+
+  const currentPage = table.getState().pagination.pageIndex + 1;
+  const totalPages = Math.max(1, table.getPageCount());
+  const pageRows = table.getRowModel().rows;
 
   return (
     <>
@@ -181,32 +248,49 @@ export default function OutgoingReferralsPage() {
           <>
             <table className="admin-table">
               <thead>
-                <tr>
-                  <th>Referral ID</th>
-                  <th>Patient</th>
-                  <th>Reason</th>
-                  <th>Priority</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                </tr>
+                {table.getHeaderGroups().map((hg) => (
+                  <tr key={hg.id}>
+                    {hg.headers.map((h) => {
+                      const sort = h.column.getIsSorted();
+                      const canSort = h.column.getCanSort();
+                      return (
+                        <th
+                          key={h.id}
+                          onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
+                          style={canSort ? { cursor: "pointer" } : undefined}
+                          aria-sort={
+                            sort === "asc"
+                              ? "ascending"
+                              : sort === "desc"
+                              ? "descending"
+                              : undefined
+                          }
+                        >
+                          {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
+                          {canSort && (
+                            <span className="sort-indicator" aria-hidden="true">
+                              {sort === "asc" ? " ▲" : sort === "desc" ? " ▼" : "  "}
+                            </span>
+                          )}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                ))}
               </thead>
               <tbody>
-                {pageRows.map((t) => {
-                  const sr = getServiceRequest(t);
-                  const refId = t.identifier?.[0]?.value || t.id;
+                {pageRows.map((row) => {
+                  const sr = getServiceRequest(row.original);
                   const srId = sr?.id;
                   return (
                     <tr
-                      key={t.id}
+                      key={row.original.id}
                       className={srId ? "clickable" : undefined}
-                      onClick={srId ? () => router.push(`/referrals/outgoing/${srId}`) : undefined}
+                      onClick={srId ? () => router.push(`/ereferral/outgoing/${srId}`) : undefined}
                     >
-                      <td><code>{refId}</code></td>
-                      <td>{patientName(t)}</td>
-                      <td>{srReason(sr)}</td>
-                      <td>{t.priority || "—"}</td>
-                      <td><span className={`badge ${t.status}`}>{t.status}</span></td>
-                      <td>{t.authoredOn ? new Date(t.authoredOn).toLocaleDateString() : "—"}</td>
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                      ))}
                     </tr>
                   );
                 })}
