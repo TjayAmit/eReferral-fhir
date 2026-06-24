@@ -6,7 +6,6 @@ import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import { useAuth } from "@/lib/auth";
 import { useSettings } from "@/lib/settings-context";
-import { fhirGet, FhirError } from "@/lib/fhir";
 import { humanName } from "@/lib/referral";
 import {
   useReactTable,
@@ -17,25 +16,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 
-function buildIndex(bundle: any): Map<string, any> {
-  const map = new Map<string, any>();
-  for (const entry of bundle?.entry || []) {
-    if (entry.fullUrl) map.set(entry.fullUrl, entry.resource);
-    if (entry.resource?.resourceType && entry.resource?.id) {
-      map.set(`${entry.resource.resourceType}/${entry.resource.id}`, entry.resource);
-    }
-  }
-  return map;
-}
-
-function srReason(sr: any): string {
-  return (
-    sr?.category?.[0]?.coding?.[0]?.display ||
-    sr?.category?.[0]?.text ||
-    sr?.reasonCode?.[0]?.coding?.[0]?.display ||
-    "—"
-  );
-}
+type Row = { encounter: any; patient: any | null; serviceRequests: any[] };
 
 export default function DraftReferralsPage() {
   const { user, ready } = useAuth();
@@ -43,8 +24,7 @@ export default function DraftReferralsPage() {
   const router = useRouter();
   const practitionerRoleId = user?.practitionerRole?.id;
 
-  const [serviceRequests, setServiceRequests] = useState<any[]>([]);
-  const [index, setIndex] = useState<Map<string, any>>(new Map());
+  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -64,35 +44,28 @@ export default function DraftReferralsPage() {
   useEffect(() => { setPage(1); }, [query]);
   useEffect(() => { setPage(1); }, [sorting]);
 
-  // Fetch ServiceRequest with status=draft
+  // Fetch encounters with draft ServiceRequests via API route
   async function load() {
     if (!practitionerRoleId) return;
     setLoading(true);
     setError(null);
     try {
-      const bundle = await fhirGet(
-        `ServiceRequest?status=draft&requester=PractitionerRole/${practitionerRoleId}&_include=ServiceRequest:subject&_include=ServiceRequest:requester&_include=ServiceRequest:performer&_sort=-authored-on&_count=100`
+      const res = await fetch(
+        `/api/draft-referrals?practitionerRole=${encodeURIComponent(practitionerRoleId)}`,
+        { headers: { "X-FHIR-Base-Url": baseUrl } }
       );
-      setIndex(buildIndex(bundle));
-      setServiceRequests(
-        (bundle.entry || [])
-          .map((e: any) => e.resource)
-          .filter((r: any) => r?.resourceType === "ServiceRequest")
-      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load draft referrals");
+      setRows(data.encounters || []);
     } catch (e) {
-      setError(e instanceof FhirError ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }
 
-  function getPatient(sr: any): any {
-    return sr.subject?.reference ? index.get(sr.subject.reference) : undefined;
-  }
-
-  function patientName(sr: any): string {
-    const p = getPatient(sr);
-    return p ? humanName(p.name) : sr.subject?.display || "—";
+  function patientName(row: Row): string {
+    return row.patient ? humanName(row.patient.name) : row.encounter?.subject?.display || "—";
   }
 
   if (!ready) return <div className="loading">Loading…</div>;
@@ -107,53 +80,62 @@ export default function DraftReferralsPage() {
     );
   }
 
-  const filtered = serviceRequests.filter((sr) => {
+  const filtered = rows.filter(({ encounter, patient, serviceRequests }) => {
     const text = [
-      sr.identifier?.[0]?.value || sr.id,
-      patientName(sr),
-      sr.status,
-      sr.priority,
-      srReason(sr),
-    ].filter(Boolean).join(" ").toLowerCase();
+      humanName(patient?.name),
+      patient?.id,
+      encounter?.id,
+      encounter?.status,
+      ...serviceRequests.map((sr: any) => sr.status),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
     return text.includes(query.toLowerCase());
   });
 
   const columns = useMemo(() => [
     {
-      id: "referralId",
-      header: "Referral ID",
-      accessorFn: (row: any) => row.identifier?.[0]?.value || row.id || "",
+      id: "patient",
+      header: "Patient",
+      accessorFn: (row: Row) => patientName(row),
+      cell: (info: any) => info.getValue(),
+    },
+    {
+      id: "encounter",
+      header: "Encounter",
+      accessorFn: (row: Row) => row.encounter?.id || "",
       cell: (info: any) => <code>{info.getValue()}</code>,
     },
     {
-      id: "patient",
-      header: "Patient",
-      accessorFn: (row: any) => patientName(row),
-      cell: (info: any) => info.getValue(),
-    },
-    {
-      id: "reason",
-      header: "Reason",
-      accessorFn: (row: any) => srReason(row),
-      cell: (info: any) => info.getValue(),
-    },
-    {
-      id: "priority",
-      header: "Priority",
-      accessorFn: (row: any) => row.priority || "",
-      cell: (info: any) => info.getValue() || "—",
+      id: "serviceRequests",
+      header: "Draft Referrals",
+      accessorFn: (row: Row) => row.serviceRequests.length,
+      cell: (info: any) => <span className="badge">{info.getValue()}</span>,
     },
     {
       id: "status",
       header: "Status",
-      accessorFn: (row: any) => row.status || "",
-      cell: (info: any) => <span className={`badge ${info.getValue()}`}>{info.getValue() || "—"}</span>,
+      accessorFn: (row: Row) => row.serviceRequests[0]?.status || row.encounter?.status || "unknown",
+      cell: (info: any) => <span className={`badge ${info.getValue() || ""}`}>{info.getValue() || "—"}</span>,
     },
     {
       id: "date",
-      header: "Date",
-      accessorFn: (row: any) => row.authoredOn ? new Date(row.authoredOn).getTime() : 0,
-      cell: (info: any) => info.row.original.authoredOn ? new Date(info.row.original.authoredOn).toLocaleDateString() : "—",
+      header: "Latest Draft Date",
+      accessorFn: (row: Row) => {
+        const srDate = row.serviceRequests[0]?.authoredOn;
+        const encDate = row.encounter?.period?.start;
+        const dates = [srDate, encDate].filter(Boolean).map((d: string) => new Date(d).getTime());
+        return Math.max(...dates, 0);
+      },
+      cell: (info: any) => {
+        const srDate = info.row.original.serviceRequests[0]?.authoredOn;
+        const encDate = info.row.original.encounter?.period?.start;
+        const latest = srDate && encDate
+          ? (new Date(srDate) > new Date(encDate) ? srDate : encDate)
+          : srDate || encDate;
+        return latest ? new Date(latest).toLocaleString() : "—";
+      },
     },
   ], []);
 
@@ -255,19 +237,20 @@ export default function DraftReferralsPage() {
                 ))}
               </thead>
               <tbody>
-                {pageRows.map((row) => {
-                  return (
-                    <tr
-                      key={row.original.id}
-                      onClick={() => router.push(`/ereferral/outgoing/${row.original.id}`)}
-                      className="clickable"
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
-                      ))}
-                    </tr>
-                  );
-                })}
+                {pageRows.map((row) => (
+                  <tr
+                    key={row.original.encounter.id}
+                    className="clickable"
+                    onClick={() => {
+                      const srId = row.original.serviceRequests?.[0]?.id;
+                      if (srId) router.push(`/ereferral/draft/${srId}`);
+                    }}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
             <Pagination

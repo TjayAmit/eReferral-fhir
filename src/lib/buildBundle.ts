@@ -183,10 +183,20 @@ function postEntry(fullUrl: string, resource: any, type: string) {
 // ---------------------------------------------------------------------------
 // Main builder
 // ---------------------------------------------------------------------------
+export type BuildOptions = {
+  existingServiceRequestId?: string;
+  existingEncounterId?: string;
+  existingChiefConditionId?: string;
+  existingDxConditionId?: string;
+  existingProcedureId?: string;
+  existingDiagnosticReportId?: string;
+};
+
 export function buildReferralBundle(
   i: ClinicalInput,
   requester: RequesterResources,
   receiving: ReceivingResources,
+  opts?: BuildOptions,
 ): any {
   const authored = toFhirDateTime(i.authoredOn);
   const eff = authored;
@@ -208,12 +218,10 @@ export function buildReferralBundle(
   // When an existing patient is selected, reference it by literal id and do not
   // re-create/upsert the Patient (only the new clinical + referral resources are sent).
   const patientRef = i.patientId ? `Patient/${i.patientId}` : uuid();
-  const srRef = uuid();
-  const encounterRef = uuid();
-  const chiefRef = uuid();
-  const impressionRef = uuid();
-  const procRef = uuid();
-  const drRef = uuid();
+  const existingSrId = opts?.existingServiceRequestId;
+  const srRef = existingSrId ? `ServiceRequest/${existingSrId}` : uuid();
+  const existingEncId = opts?.existingEncounterId;
+  const encounterRef = existingEncId ? `Encounter/${existingEncId}` : uuid();
   const taskRef = uuid();
   const provRef = uuid();
 
@@ -263,6 +271,10 @@ export function buildReferralBundle(
   // Practitioner, Organizations and PractitionerRoles already exist on the server;
   // they are referenced by literal id (see refs above) and are NOT re-submitted.
 
+  // Determine impressionRef early — referenced by ServiceRequest.reasonReference
+  const existingDxId = opts?.existingDxConditionId;
+  const impressionRef = existingDxId ? `Condition/${existingDxId}` : uuid();
+
   // ── ServiceRequest ───────────────────────────────────────────────────────
   const cat = REFERRAL_CATEGORY[i.referralCategory] || REFERRAL_CATEGORY.emergency;
   const sr: any = {
@@ -287,53 +299,67 @@ export function buildReferralBundle(
     `Requisition: ${esc(i.referralId)} · Category: ${esc(cat.text)}`,
     `Reason: ${esc(i.reasonText)}`,
   ]);
-  entries.push(postEntry(srRef, sr, "ServiceRequest"));
+  if (existingSrId) {
+    sr.id = existingSrId;
+    entries.push(putEntry(srRef, sr, `ServiceRequest/${existingSrId}`));
+  } else {
+    entries.push(postEntry(srRef, sr, "ServiceRequest"));
+  }
 
   // ── 8. Encounter ─────────────────────────────────────────────────────────
-  const encounter: any = {
-    resourceType: "Encounter",
-    meta: { profile: [PROFILE.encounter] },
-    language: "en",
-    status: "finished",
-    class: { system: CS.actCode, code: i.encounterClass, display: i.encounterClassDisplay },
-    subject: { reference: patientRef },
-  };
-  encounter.text = narrative("Encounter", undefined, [`Status: finished · Class: ${esc(i.encounterClassDisplay)}`]);
-  entries.push(postEntry(encounterRef, encounter, "Encounter"));
+  // Only create a new Encounter when not reusing an existing one.
+  if (!existingEncId) {
+    const encounter: any = {
+      resourceType: "Encounter",
+      meta: { profile: [PROFILE.encounter] },
+      language: "en",
+      status: "finished",
+      class: { system: CS.actCode, code: i.encounterClass, display: i.encounterClassDisplay },
+      subject: { reference: patientRef },
+    };
+    encounter.text = narrative("Encounter", undefined, [`Status: finished · Class: ${esc(i.encounterClassDisplay)}`]);
+    entries.push(postEntry(encounterRef, encounter, "Encounter"));
+  }
 
   // ── 9. Condition — chief complaint ───────────────────────────────────────
-  const chief: any = {
-    resourceType: "Condition",
-    meta: { profile: [PROFILE.condition] },
-    language: "en",
-    clinicalStatus: { coding: [{ system: CS.conditionClinical, code: "active" }] },
-    category: [{ coding: [{ system: CS.conditionCategory, code: "problem-list-item", display: "Problem List Item" }] }],
-    code: { text: i.chiefComplaint },
-    subject: { reference: patientRef },
-    encounter: { reference: encounterRef },
-    note: i.clinicalHistory ? [{ text: i.clinicalHistory }] : undefined,
-  };
-  chief.text = narrative("Condition", undefined, [`Chief complaint: ${esc(i.chiefComplaint)}`]);
-  entries.push(postEntry(chiefRef, chief, "Condition"));
+  const existingChiefId = opts?.existingChiefConditionId;
+  const chiefRef = existingChiefId ? `Condition/${existingChiefId}` : uuid();
+  if (!existingChiefId) {
+    const chief: any = {
+      resourceType: "Condition",
+      meta: { profile: [PROFILE.condition] },
+      language: "en",
+      clinicalStatus: { coding: [{ system: CS.conditionClinical, code: "active" }] },
+      category: [{ coding: [{ system: CS.conditionCategory, code: "problem-list-item", display: "Problem List Item" }] }],
+      code: { text: i.chiefComplaint },
+      subject: { reference: patientRef },
+      encounter: { reference: encounterRef },
+      note: i.clinicalHistory ? [{ text: i.clinicalHistory }] : undefined,
+    };
+    chief.text = narrative("Condition", undefined, [`Chief complaint: ${esc(i.chiefComplaint)}`]);
+    entries.push(postEntry(chiefRef, chief, "Condition"));
+  }
 
   // ── 10. Condition — working impression ───────────────────────────────────
-  const impression: any = {
-    resourceType: "Condition",
-    meta: { profile: [PROFILE.condition] },
-    language: "en",
-    clinicalStatus: { coding: [{ system: CS.conditionClinical, code: "active" }] },
-    verificationStatus: { coding: [{ system: CS.conditionVer, code: "provisional", display: "Provisional" }] },
-    category: [{ coding: [{ system: CS.conditionCategory, code: "encounter-diagnosis", display: "Encounter Diagnosis" }] }],
-    code: {
-      coding: i.impression.code ? [{ system: CS.snomed, code: i.impression.code, display: i.impression.display }] : undefined,
-      text: i.impression.text,
-    },
-    subject: { reference: patientRef },
-    encounter: { reference: encounterRef },
-    note: i.clinicalHistory ? [{ text: i.clinicalHistory }] : undefined,
-  };
-  impression.text = narrative("Condition", undefined, [`Working impression: ${esc(i.impression.text)}`]);
-  entries.push(postEntry(impressionRef, impression, "Condition"));
+  if (!existingDxId) {
+    const impression: any = {
+      resourceType: "Condition",
+      meta: { profile: [PROFILE.condition] },
+      language: "en",
+      clinicalStatus: { coding: [{ system: CS.conditionClinical, code: "active" }] },
+      verificationStatus: { coding: [{ system: CS.conditionVer, code: "provisional", display: "Provisional" }] },
+      category: [{ coding: [{ system: CS.conditionCategory, code: "encounter-diagnosis", display: "Encounter Diagnosis" }] }],
+      code: {
+        coding: i.impression.code ? [{ system: CS.snomed, code: i.impression.code, display: i.impression.display }] : undefined,
+        text: i.impression.text,
+      },
+      subject: { reference: patientRef },
+      encounter: { reference: encounterRef },
+      note: i.clinicalHistory ? [{ text: i.clinicalHistory }] : undefined,
+    };
+    impression.text = narrative("Condition", undefined, [`Working impression: ${esc(i.impression.text)}`]);
+    entries.push(postEntry(impressionRef, impression, "Condition"));
+  }
 
   // ── 11–16. Vital-sign Observations ───────────────────────────────────────
   const VITALS = [
@@ -385,40 +411,46 @@ export function buildReferralBundle(
   }
 
   // ── 17. Procedure — treatment given ──────────────────────────────────────
-  const procedure: any = {
-    resourceType: "Procedure",
-    meta: { profile: [PROFILE.procedure] },
-    language: "en",
-    status: "completed",
-    code: { coding: [{ system: CS.snomed, code: "416608005", display: "Drug therapy" }] },
-    subject: { reference: patientRef },
-    encounter: { reference: encounterRef },
-    note: i.treatment ? [{ text: i.treatment }] : undefined,
-  };
-  procedure.text = narrative("Procedure", undefined, [`Treatment: ${esc(i.treatment)}`]);
-  entries.push(postEntry(procRef, procedure, "Procedure"));
+  const existingProcId = opts?.existingProcedureId;
+  const procRef = existingProcId ? `Procedure/${existingProcId}` : uuid();
+  if (!existingProcId) {
+    const procedure: any = {
+      resourceType: "Procedure",
+      meta: { profile: [PROFILE.procedure] },
+      language: "en",
+      status: "completed",
+      code: { coding: [{ system: CS.snomed, code: "416608005", display: "Drug therapy" }] },
+      subject: { reference: patientRef },
+      encounter: { reference: encounterRef },
+      note: i.treatment ? [{ text: i.treatment }] : undefined,
+    };
+    procedure.text = narrative("Procedure", undefined, [`Treatment: ${esc(i.treatment)}`]);
+    entries.push(postEntry(procRef, procedure, "Procedure"));
+  }
 
   // ── 18. DiagnosticReport (no profile in the IG example) ──────────────────
-  // No `contentType` on the attachment: this server's required MimeType binding
-  // can't resolve urn:ietf:bcp:13, so any mime value errors — data alone is valid.
-  const dr: any = {
-    resourceType: "DiagnosticReport",
-    language: "en",
-    status: "final",
-    category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v2-0074", code: "LAB", display: "Laboratory" }] }],
-    code: {
-      coding: [{ system: CS.loinc, code: "24356-8", display: "Urinalysis complete panel - Urine" }],
-      text: i.diagnostic.title || "Urinalysis",
-    },
-    subject: { reference: patientRef },
-    encounter: { reference: encounterRef },
-    effectiveDateTime: eff,
-    performer: [{ reference: submissionRoleRef }],
-    conclusion: i.diagnostic.conclusion || undefined,
-    presentedForm: [{ title: i.diagnostic.title || undefined }],
-  };
-  dr.text = narrative("DiagnosticReport", undefined, [`Urinalysis · ${esc(i.diagnostic.conclusion)}`]);
-  entries.push(postEntry(drRef, dr, "DiagnosticReport"));
+  const existingDrId = opts?.existingDiagnosticReportId;
+  const drRef = existingDrId ? `DiagnosticReport/${existingDrId}` : uuid();
+  if (!existingDrId) {
+    const dr: any = {
+      resourceType: "DiagnosticReport",
+      language: "en",
+      status: "final",
+      category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v2-0074", code: "LAB", display: "Laboratory" }] }],
+      code: {
+        coding: [{ system: CS.loinc, code: "24356-8", display: "Urinalysis complete panel - Urine" }],
+        text: i.diagnostic.title || "Urinalysis",
+      },
+      subject: { reference: patientRef },
+      encounter: { reference: encounterRef },
+      effectiveDateTime: eff,
+      performer: [{ reference: submissionRoleRef }],
+      conclusion: i.diagnostic.conclusion || undefined,
+      presentedForm: [{ title: i.diagnostic.title || undefined }],
+    };
+    dr.text = narrative("DiagnosticReport", undefined, [`Urinalysis · ${esc(i.diagnostic.conclusion)}`]);
+    entries.push(postEntry(drRef, dr, "DiagnosticReport"));
+  }
 
   // ── 19. Task (owner = receiving PractitionerRole, else Organization) ─────
   const task: any = {

@@ -220,11 +220,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [pathname]);
 
+  const SYSTEM_ROOT: Record<System, string> = {
+    "doh-lgu": "/doh/dashboards/lgu",
+    "clinical": "/clinical/triage",
+    "ereferral": "/ereferral",
+  };
+
   const handleSystemChange = (system: System) => {
     setActiveSystem(system);
     try {
       localStorage.setItem("eref_active_system", system);
     } catch { /* ignore */ }
+    router.push(SYSTEM_ROOT[system]);
   };
 
   const isLogin = pathname === "/login";

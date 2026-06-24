@@ -4,15 +4,38 @@ import { fhirGet, FhirError } from '@/lib/fhir';
 const refId = (ref?: string) => ref?.split('/').pop() || '';
 const collect = (b: any) => (b?.entry || []).map((e: any) => e.resource).filter(Boolean);
 
-// GET: Fetch encounters with ServiceRequest from the organization
-// Query param: ?organization=<orgId>
+// GET supports two modes:
+//   ?organization=<orgId>  → Clinical Waiting LIST: encounters with ServiceRequests
+//   ?encounter=<encId>     → Clinical Waiting VIEW: one Encounter + clinical data + ServiceRequests
 export async function GET(request: NextRequest) {
   try {
     const baseUrl = request.headers.get('X-FHIR-Base-Url') || undefined;
     const organization = request.nextUrl.searchParams.get('organization');
+    const encounter = request.nextUrl.searchParams.get('encounter');
 
-    if (!organization) {
-      return NextResponse.json({ error: 'organization parameter is required' }, { status: 400 });
+    if (!organization && !encounter) {
+      return NextResponse.json({ error: 'organization or encounter parameter is required' }, { status: 400 });
+    }
+
+    // ── VIEW a single encounter (detail page) ────────────────────────────
+    if (encounter) {
+      const [encBundle, condBundle, procBundle, drBundle, srBundle] = await Promise.all([
+        fhirGet(`Encounter?_id=${encounter}&_include=Encounter:subject&_revinclude=Observation:encounter`, baseUrl),
+        fhirGet(`Condition?encounter=Encounter/${encounter}&_count=50`, baseUrl),
+        fhirGet(`Procedure?encounter=Encounter/${encounter}&_count=50`, baseUrl),
+        fhirGet(`DiagnosticReport?encounter=Encounter/${encounter}&_count=50`, baseUrl),
+        fhirGet(`ServiceRequest?encounter=Encounter/${encounter}&_count=50`, baseUrl),
+      ]);
+      const all = collect(encBundle);
+      return NextResponse.json({
+        encounter: all.find((r: any) => r.resourceType === 'Encounter') || null,
+        patient: all.find((r: any) => r.resourceType === 'Patient') || null,
+        observations: all.filter((r: any) => r.resourceType === 'Observation'),
+        conditions: collect(condBundle),
+        procedures: collect(procBundle),
+        diagnosticReports: collect(drBundle),
+        serviceRequests: collect(srBundle),
+      });
     }
 
     // Fetch Encounters with service-provider matching the organization

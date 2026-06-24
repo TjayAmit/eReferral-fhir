@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { useSettings } from "@/lib/settings-context";
 import { fhirGet, submitTransaction, FhirError } from "@/lib/fhir";
 import {
   type ClinicalInput,
@@ -93,6 +95,9 @@ type Result = { ok: boolean; bundle?: any; error?: string };
 
 export default function SubmitPage() {
   const { user } = useAuth();
+  const { baseUrl } = useSettings();
+  const searchParams = useSearchParams();
+  const draftId = searchParams.get("draft");
 
   const [orgs, setOrgs] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
@@ -104,6 +109,129 @@ export default function SubmitPage() {
   const [showJson, setShowJson] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftEncounterId, setDraftEncounterId] = useState<string | undefined>(undefined);
+  const [existingClinicalIds, setExistingClinicalIds] = useState<{
+    chiefConditionId?: string;
+    dxConditionId?: string;
+    procedureId?: string;
+    diagnosticReportId?: string;
+  }>({});
+
+  // ── Load draft data when ?draft= is present ───────────────────────────
+  useEffect(() => {
+    if (!draftId) return;
+    setDraftLoading(true);
+    setDraftError(null);
+    fetch(`/api/draft-referrals?serviceRequest=${encodeURIComponent(draftId)}`, {
+      headers: { "X-FHIR-Base-Url": baseUrl },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) throw new Error(data.error);
+        applyDraftToForm(data);
+      })
+      .catch((e) => setDraftError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setDraftLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftId, baseUrl]);
+
+  function applyDraftToForm(d: any) {
+    const sr = d.serviceRequest;
+    const patient = d.patient;
+    const enc = d.encounter;
+    const obs = d.observations || [];
+    const conds = d.conditions || [];
+    const procs = d.procedures || [];
+    const dr = (d.diagnosticReports || [])[0];
+
+    if (enc?.id) setDraftEncounterId(enc.id);
+
+    // Extract existing clinical resource IDs to reuse instead of creating duplicates
+    const chief = conds.find((x: any) => x.category?.[0]?.coding?.[0]?.code === "problem-list-item");
+    const dx = conds.find((x: any) => x.category?.[0]?.coding?.[0]?.code === "encounter-diagnosis");
+    setExistingClinicalIds({
+      chiefConditionId: chief?.id,
+      dxConditionId: dx?.id,
+      procedureId: procs?.[0]?.id,
+      diagnosticReportId: dr?.id,
+    });
+
+    setInput((prev) => {
+      const next: any = structuredClone(prev);
+
+      // Patient
+      if (patient) {
+        next.patientId = patient.id;
+        const n = patient.name?.[0] || {};
+        next.patient.given = (n.given || []).join(" ");
+        next.patient.family = n.family || "";
+        next.patient.gender = patient.gender || "unknown";
+        next.patient.birthDate = patient.birthDate || "";
+        const phId = (patient.identifier || []).find((i: any) => (i.system || "").includes("philhealth-id"));
+        next.patient.philhealth = phId?.value || "";
+        const psId = (patient.identifier || []).find((i: any) => (i.system || "").includes("philsys-id"));
+        next.patient.philsys = psId?.value || "";
+        next.patient.phone = (patient.telecom || []).find((t: any) => t.system === "phone")?.value || "";
+        const addr = patient.address?.[0] || {};
+        next.patient.line = (addr.line || []).join(", ");
+        next.patient.city = addr.city || "";
+        next.patient.postalCode = addr.postalCode || "";
+        const c = patient.contact?.[0];
+        next.patient.contactGiven = (c?.name?.given || []).join(" ");
+        next.patient.contactFamily = c?.name?.family || "";
+        next.patient.contactRelCode = c?.relationship?.[0]?.coding?.[0]?.code || "";
+        next.patient.contactRelDisplay = c?.relationship?.[0]?.coding?.[0]?.display || "";
+      }
+
+      // Vitals (latest from observations)
+      const v = latestVitals({ entry: obs.map((o: any) => ({ resource: o })) });
+      for (const k of Object.keys(v) as (keyof typeof v)[]) {
+        if (v[k] != null) next.vitals[k] = v[k];
+      }
+
+      // Clinical
+      const chief = conds.find((x: any) => x.category?.[0]?.coding?.[0]?.code === "problem-list-item");
+      if (chief) {
+        if (chief.code?.text) next.chiefComplaint = chief.code.text;
+        if (chief.note?.[0]?.text) next.clinicalHistory = chief.note[0].text;
+      }
+      const dx = conds.find((x: any) => x.category?.[0]?.coding?.[0]?.code === "encounter-diagnosis");
+      if (dx) {
+        next.impression.code = dx.code?.coding?.[0]?.code || "";
+        next.impression.display = dx.code?.coding?.[0]?.display || "";
+        next.impression.text = dx.code?.text || "";
+      }
+      if (procs[0]?.note?.[0]?.text) next.treatment = procs[0].note[0].text;
+
+      // Laboratory
+      if (dr) {
+        next.diagnostic.title = dr.presentedForm?.[0]?.title || dr.code?.text || "";
+        next.diagnostic.conclusion = dr.conclusion || "";
+      }
+
+      // ServiceRequest metadata
+      if (sr) {
+        if (sr.requisition?.value) next.referralId = sr.requisition.value;
+        if (sr.category?.[0]?.coding?.[0]?.code === "emergency" || sr.category?.[0]?.coding?.[0]?.code === "outpatient") {
+          next.referralCategory = sr.category[0].coding[0].code;
+        }
+        if (sr.reasonCode?.[0]?.text) next.reasonText = sr.reasonCode[0].text;
+        if (sr.note?.[0]?.text) next.referralNote = sr.note[0].text;
+        if (sr.performer?.[0]?.reference) {
+          const orgId = sr.performer[0].reference.split("/").pop();
+          next.selectedReceivingOrgId = orgId || "";
+        }
+        if (sr.authoredOn) {
+          const d = new Date(sr.authoredOn);
+          next.authoredOn = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}T${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+        }
+      }
+
+      return next;
+    });
+  }
 
   useEffect(() => {
     fhirGet("Organization?_sort=name&_count=100").then((b) =>
@@ -120,7 +248,10 @@ export default function SubmitPage() {
     ).catch(() => {});
 
     // Assign the next running referral ID (REF-<year>-NNNNNN) from the server.
-    fetchNextReferralId().then((id) => set("referralId", id)).catch(() => {});
+    if (!draftId) {
+      fetchNextReferralId().then((id) => set("referralId", id)).catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch PractitionerRoles for the selected receiving organization
@@ -271,10 +402,20 @@ export default function SubmitPage() {
         ? buildReferralBundle(
             input,
             { practitioner: user!.practitioner, organization: user!.organization, practitionerRole: user!.practitionerRole },
-            { organization: receivingOrg, practitionerRole: selectedReceivingRole || undefined, practitioner: receivingPractitioner || undefined }
+            { organization: receivingOrg, practitionerRole: selectedReceivingRole || undefined, practitioner: receivingPractitioner || undefined },
+            draftId
+              ? {
+                  existingServiceRequestId: draftId,
+                  existingEncounterId: draftEncounterId,
+                  existingChiefConditionId: existingClinicalIds.chiefConditionId,
+                  existingDxConditionId: existingClinicalIds.dxConditionId,
+                  existingProcedureId: existingClinicalIds.procedureId,
+                  existingDiagnosticReportId: existingClinicalIds.diagnosticReportId,
+                }
+              : undefined
           )
         : null,
-    [input, hasRequester, user, receivingOrg, selectedReceivingRole, receivingPractitioner]
+    [input, hasRequester, user, receivingOrg, selectedReceivingRole, receivingPractitioner, draftId, draftEncounterId, existingClinicalIds]
   );
 
   async function onSubmit() {
@@ -298,6 +439,14 @@ export default function SubmitPage() {
         One <code>transaction</code> Bundle, structured to match the IG example. Your practitioner, role and
         organization come from your account; fill in the patient/clinical data and select the receiving facility.
       </p>
+
+      {draftId && draftLoading && <p className="muted">Loading draft referral data…</p>}
+      {draftId && draftError && <div className="alert err">❌ {draftError}</div>}
+      {draftId && !draftLoading && !draftError && (
+        <div className="alert ok">
+          ✅ Pre-filled from draft <code>{draftId}</code>. Review and adjust before submitting.
+        </div>
+      )}
 
       {missingConfig && (
         <div className="alert err">

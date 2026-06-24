@@ -1044,6 +1044,13 @@ tr.clickable:hover { background: #f0f6ff; cursor: pointer; }
   color: #fff;
 }
 
+.system-switcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: transparent;
+}
+
 /* ---- SearchableSelect ---- */
 .searchable-select {
   position: relative;

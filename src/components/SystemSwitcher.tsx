@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 export type System = "doh-lgu" | "clinical" | "ereferral";
 
@@ -46,6 +46,7 @@ export default function SystemSwitcher({
   onChange: (system: System) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -55,37 +56,59 @@ export default function SystemSwitcher({
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    // Delay slightly so the toggle click itself doesn't immediately close the menu
+    const id = setTimeout(() => {
+      document.addEventListener("mousedown", onClick);
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener("mousedown", onClick);
+    };
+  }, [open]);
+
   const activeSystem = SYSTEMS.find((s) => s.id === active) ?? SYSTEMS[2];
 
   return (
-    <div className="system-switcher">
-      {open && (
-        <div className="system-switcher-menu">
-          {SYSTEMS.map((s) => (
-            <button
-              key={s.id}
-              className={active === s.id ? "active" : ""}
-              onClick={() => {
-                onChange(s.id);
-                setOpen(false);
-              }}
-              aria-pressed={active === s.id}
-            >
-              <span className="ic" aria-hidden>{s.icon}</span>
-              <span>{s.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      <button
-        className="system-switcher-toggle"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        aria-label="Switch system"
-      >
-        <span className="ic" aria-hidden>{activeSystem.icon}</span>
-        <span>{activeSystem.short}</span>
-      </button>
-    </div>
+    <>
+      {open && <div className="system-switcher-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />}
+      <div className="system-switcher" ref={containerRef}>
+        {open && (
+          <div className="system-switcher-menu" onClick={(e) => e.stopPropagation()}>
+            {SYSTEMS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={active === s.id ? "active" : ""}
+                onClick={() => {
+                  onChange(s.id);
+                  setOpen(false);
+                }}
+                aria-pressed={active === s.id}
+              >
+                <span className="ic" aria-hidden>{s.icon}</span>
+                <span>{s.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          className="system-switcher-toggle"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-label="Switch system"
+        >
+          <span className="ic" aria-hidden>{activeSystem.icon}</span>
+          <span>{activeSystem.short}</span>
+        </button>
+      </div>
+    </>
   );
 }

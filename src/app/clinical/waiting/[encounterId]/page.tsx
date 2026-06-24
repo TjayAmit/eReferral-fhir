@@ -17,6 +17,7 @@ type Detail = {
   conditions: any[];
   procedures: any[];
   diagnosticReports?: any[];
+  serviceRequests?: any[];
 };
 
 const idVal = (res: any, kind: string) =>
@@ -77,8 +78,6 @@ export default function ClinicalWaitingViewPage() {
     procedureId: "",
     diagnosticReportId: "",
   });
-  const [serviceRequests, setServiceRequests] = useState<any[]>([]);
-
   useEffect(() => {
     if (ready && user && !canAccess) router.replace("/");
   }, [ready, user, canAccess, router]);
@@ -92,23 +91,13 @@ export default function ClinicalWaitingViewPage() {
     setLoading(true);
     setError(null);
     try {
-      const [clinicalRes, srRes] = await Promise.all([
-        fetch(`/api/clinical-assessment?encounter=${encodeURIComponent(encounterId)}`, {
-          headers: { "X-FHIR-Base-Url": baseUrl },
-        }),
-        fetch(`/api/service-request?encounter=Encounter/${encounterId}`, {
-          headers: { "X-FHIR-Base-Url": baseUrl },
-        }).catch(() => null),
-      ]);
-      const data = await clinicalRes.json();
-      if (!clinicalRes.ok) throw new Error(data.error || "Failed to load encounter");
+      const res = await fetch(`/api/clinical-waiting?encounter=${encodeURIComponent(encounterId)}`, {
+        headers: { "X-FHIR-Base-Url": baseUrl },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load encounter");
       setDetail(data);
       prefill(data);
-
-      if (srRes) {
-        const srData = await srRes.json();
-        setServiceRequests(srData.serviceRequests || srData || []);
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -267,13 +256,13 @@ export default function ClinicalWaitingViewPage() {
                       <span className="section-indicator" />
                       <h2 className="section-title">Service Requests</h2>
                     </div>
-                    <span className="section-count">{serviceRequests.length}</span>
+                    <span className="section-count">{(detail?.serviceRequests || []).length}</span>
                   </div>
-                  {serviceRequests.length === 0 ? (
+                  {(detail?.serviceRequests || []).length === 0 ? (
                     <p className="muted">No service requests linked.</p>
                   ) : (
                     <div style={{ display: "grid", gap: 12 }}>
-                      {serviceRequests.map((sr: any) => (
+                      {(detail?.serviceRequests || []).map((sr: any) => (
                         <div key={sr.id} style={{ padding: 12, background: "var(--surface)", borderRadius: 8, border: "1px solid var(--border)" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                             <code style={{ fontSize: 13 }}>{sr.id}</code>
