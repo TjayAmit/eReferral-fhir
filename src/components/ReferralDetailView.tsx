@@ -127,22 +127,22 @@ function PatientCard({ patient }: { patient: any }) {
         </div>
       </div>
 
-      <div className="patient-grid">
-        <div className="pg-cell">
-          <span className="pg-label">PhilHealth</span>
-          <span className={`pg-value ${!philhealth ? "muted" : ""}`}>{philhealth || "Not provided"}</span>
+      <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>PhilHealth</span>
+          <span style={{ fontSize: 13, color: "#111827" }}>{philhealth || "Not provided"}</span>
         </div>
-        <div className="pg-cell">
-          <span className="pg-label">PhilSys</span>
-          <span className={`pg-value ${!philsys ? "muted" : ""}`}>{philsys || "Not provided"}</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>PhilSys</span>
+          <span style={{ fontSize: 13, color: "#111827" }}>{philsys || "Not provided"}</span>
         </div>
-        <div className="pg-cell">
-          <span className="pg-label">Address</span>
-          <span className={`pg-value ${!address ? "muted" : ""}`}>{address || "Not provided"}</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>Address</span>
+          <span style={{ fontSize: 13, color: "#111827" }}>{address || "Not provided"}</span>
         </div>
-        <div className="pg-cell">
-          <span className="pg-label">Contact</span>
-          <span className={`pg-value ${!contact ? "muted" : ""}`}>{contact || "Not provided"}</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>Contact</span>
+          <span style={{ fontSize: 13, color: "#111827" }}>{contact || "Not provided"}</span>
         </div>
       </div>
     </div>
@@ -240,10 +240,25 @@ function VitalsPanel({ observations }: { observations: any[] }) {
     return `${m}/${day}/${y} · ${h12}:${minutes} ${ampm}`;
   }
 
+  // Group observations by date (day-level) and keep only the latest group
+  function dateKey(o: any): string {
+    const d = o.effectiveDateTime ? new Date(o.effectiveDateTime) : o.issued ? new Date(o.issued) : null;
+    if (!d) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  const grouped = new Map<string, any[]>();
+  for (const o of observations) {
+    const k = dateKey(o);
+    if (!grouped.has(k)) grouped.set(k, []);
+    grouped.get(k)!.push(o);
+  }
+  const latestDate = Array.from(grouped.keys()).sort().pop() || "";
+  const latestObs = latestDate ? grouped.get(latestDate)! : observations;
+
   const known: VitalItem[] = [];
   const others: any[] = [];
 
-  for (const o of observations) {
+  for (const o of latestObs) {
     const code = getCode(o);
     const isBP = code === "8480-6" || code === "8462-4" || code === "85354-9" || hasBPComponent(o);
     if (isBP || !code) {
@@ -444,6 +459,7 @@ export default function ReferralDetailView({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"referral" | "clinical">("referral");
 
   // Task from detail fetch is fresher (has latest status)
   const activeTask = detail?.task ?? taskProp;
@@ -484,9 +500,7 @@ export default function ReferralDetailView({
         `&_include:iterate=PractitionerRole:organization` +
         `&_include:iterate=PractitionerRole:practitioner` +
         `&_revinclude=Task:focus` +
-        `&_include=Task:owner` +
-        `&_include=Task:requester` +
-        `&_revinclude=Provenance:target`
+        `&_include=Task:owner`
       );
 
       const all = dedupeResources(bundle);
@@ -522,21 +536,26 @@ export default function ReferralDetailView({
         return practitioners.find((p) => p.id === practId) || null;
       };
 
-      // Use the most recently updated provenance
-      const latestProvenance = provenances.sort((a, b) =>
-        new Date(b.meta?.lastUpdated || 0).getTime() - new Date(a.meta?.lastUpdated || 0).getTime()
-      )[0] || null;
-
       const patient = all.find((r) => r.resourceType === "Patient") || null;
       const tasks = all.filter((r) => r.resourceType === "Task");
       const task = latestTask(tasks);
 
+      const collect = (b: any, rt: string): any[] =>
+        (b?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === rt);
+
+      // Fetch Provenance separately (removed from main query to avoid HAPI hang)
+      let latestProvenance: any = null;
+      try {
+        const provBundle = await fhirGet(`Provenance?target=ServiceRequest/${sr.id}&_sort=-_lastUpdated&_count=1`);
+        const provs = collect(provBundle, "Provenance");
+        latestProvenance = provs[0] || null;
+      } catch {
+        /* ignore provenance fetch errors */
+      }
+
       // The encounter was included with the ServiceRequest in step 1.
       const encounter = all.find((r) => r.resourceType === "Encounter") || null;
       const encounterId = encounter?.id || refId(sr.encounter?.reference || "");
-
-      const collect = (b: any, rt: string): any[] =>
-        (b?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === rt);
 
       // Step 2: Use the Encounter to gather everything recorded during the visit —
       // Observations, Conditions, Procedures and DiagnosticReports are linked to it.
@@ -552,10 +571,10 @@ export default function ReferralDetailView({
           fhirGet(`Procedure?encounter=${enc}&_count=100`),
           fhirGet(`DiagnosticReport?encounter=${enc}&_count=100`),
         ]);
-        observations = collect(obsB, "Observation");
-        conditions = collect(condB, "Condition");
-        procedures = collect(procB, "Procedure");
-        diagnosticReports = collect(drB, "DiagnosticReport");
+        observations = (obsB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Observation");
+        conditions = (condB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Condition");
+        procedures = (procB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Procedure");
+        diagnosticReports = (drB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "DiagnosticReport");
       }
 
       // Fallback: older referrals whose clinical resources aren't linked to an
@@ -570,10 +589,10 @@ export default function ReferralDetailView({
           fhirGet(`Procedure?subject=${subj}&_count=100`),
           fhirGet(`DiagnosticReport?subject=${subj}&_count=100`),
         ]);
-        if (observations.length === 0) observations = collect(obsB, "Observation");
-        if (conditions.length === 0) conditions = collect(condB, "Condition");
-        if (procedures.length === 0) procedures = collect(procB, "Procedure");
-        if (diagnosticReports.length === 0) diagnosticReports = collect(drB, "DiagnosticReport");
+        if (observations.length === 0) observations = (obsB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Observation");
+        if (conditions.length === 0) conditions = (condB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Condition");
+        if (procedures.length === 0) procedures = (procB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Procedure");
+        if (diagnosticReports.length === 0) diagnosticReports = (drB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "DiagnosticReport");
       }
 
       // Receiving side: ServiceRequest.performer = Organization only;
@@ -694,203 +713,247 @@ export default function ReferralDetailView({
       {loading && <p className="muted">Loading referral details…</p>}
 
       {detail && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, alignItems: "start" }}>
-          <div>
-            {/* Referral summary */}
-            <Section title="Referral summary" resource="ServiceRequest">
-            <dl className="kv">
-              <dt>Referral ID</dt>
-              <dd>{sr.requisition?.value || sr.identifier?.[0]?.value || sr.id}</dd>
-              <dt>Status</dt>
-              <dd><span className={`badge ${status}`}>{status}</span></dd>
-              <dt>Intent</dt>
-              <dd>{sr.intent || "—"}</dd>
-              <dt>Priority</dt>
-              <dd>{sr.priority || "—"}</dd>
-              <dt>Referral Category</dt>
-              <dd>{sr.category?.[0]?.coding?.[0]?.display || sr.category?.[0]?.text || "—"}</dd>
-              <dt>Reason for Referral (Service Type)</dt>
-              <dd>{sr.reasonCode?.[0]?.coding?.[0]?.display || sr.reasonCode?.[0]?.text || "—"}</dd>
-              <dt>Clinical Reason</dt>
-              <dd>{sr.reasonCode?.[0]?.text || "—"}</dd>
-              <dt>Date of Referral</dt>
-              <dd>{sr.authoredOn ? new Date(sr.authoredOn).toLocaleString() : "—"}</dd>
-              <dt>Occurrence</dt>
-              <dd>{sr.occurrenceDateTime
-                ? new Date(sr.occurrenceDateTime).toLocaleString()
-                : sr.occurrencePeriod?.start
-                ? new Date(sr.occurrencePeriod.start).toLocaleString()
-                : "—"}</dd>
-              <dt>Notes</dt>
-              <dd>{sr.note?.[0]?.text || "—"}</dd>
-            </dl>
-          </Section>
+        <>
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e5e7eb", marginBottom: 16 }}>
+            <button
+              onClick={() => setActiveTab("referral")}
+              style={{
+                padding: "10px 20px",
+                border: "none",
+                borderBottom: activeTab === "referral" ? "2px solid #2563eb" : "2px solid transparent",
+                background: "transparent",
+                color: activeTab === "referral" ? "#2563eb" : "#6b7280",
+                fontWeight: activeTab === "referral" ? 600 : 400,
+                fontSize: 14,
+                cursor: "pointer",
+                marginBottom: -1,
+              }}
+            >
+              Referral Details
+            </button>
+            <button
+              onClick={() => setActiveTab("clinical")}
+              style={{
+                padding: "10px 20px",
+                border: "none",
+                borderBottom: activeTab === "clinical" ? "2px solid #2563eb" : "2px solid transparent",
+                background: "transparent",
+                color: activeTab === "clinical" ? "#2563eb" : "#6b7280",
+                fontWeight: activeTab === "clinical" ? 600 : 400,
+                fontSize: 14,
+                cursor: "pointer",
+                marginBottom: -1,
+              }}
+            >
+              Clinical Details
+            </button>
+          </div>
 
-          {/* Facilities & Practitioners */}
-          <Section title="Facilities & Practitioners" resource="Organization / PractitionerRole / Practitioner">
-            <div className="grid two">
-              <dl className="kv" style={{ margin: 0 }}>
-                <dt style={{ gridColumn: "1/-1", color: "var(--ink)", fontWeight: 700, marginBottom: 4 }}>
-                  Initiating (Requester)
-                </dt>
-                <dt>Organization</dt>
-                <dd>{detail.requesterOrg?.name || refId(sr.requester?.reference || "") || "—"}</dd>
-                <dt>NHFR</dt>
-                <dd>{idVal(detail.requesterOrg, "nhfr") || "—"}</dd>
-                <dt>HCPN</dt>
-                <dd>{idVal(detail.requesterOrg, "hcpn") || "—"}</dd>
-                <dt>Address</dt>
-                <dd>{formatAddress(detail.requesterOrg?.address) || "—"}</dd>
-                <dt>Contact Number</dt>
-                <dd>{firstPhone(detail.requesterOrg?.telecom) || "—"}</dd>
-                <dt>Email</dt>
-                <dd>{firstEmail(detail.requesterOrg?.telecom) || "—"}</dd>
-                <dt style={{ gridColumn: "1/-1", color: "var(--ink)", fontWeight: 700, marginTop: 8, marginBottom: 4, borderTop: "1px solid #e0e0e0", paddingTop: 8 }}>
-                  Referring Practitioner
-                </dt>
-                <dt>Name</dt>
-                <dd>{humanName(detail.requesterPractitioner?.name) || "—"}</dd>
-                <dt>Role</dt>
-                <dd>{detail.requesterRole?.code?.[0]?.coding?.[0]?.display || detail.requesterRole?.code?.[0]?.text || "—"}</dd>
-                <dt>Specialty</dt>
-                <dd>{specialtyText(detail.requesterRole)}</dd>
-                <dt>PRC</dt>
-                <dd>{idVal(detail.requesterPractitioner, "prc") || "—"}</dd>
-              </dl>
-              <dl className="kv" style={{ margin: 0 }}>
-                <dt style={{ gridColumn: "1/-1", color: "var(--ink)", fontWeight: 700, marginBottom: 4 }}>
-                  Receiving (Performer)
-                </dt>
-                <dt>Organization</dt>
-                <dd>{detail.performerOrg?.name || refId(sr.performer?.[0]?.reference || "") || "—"}</dd>
-                <dt>NHFR</dt>
-                <dd>{idVal(detail.performerOrg, "nhfr") || "—"}</dd>
-                <dt>HCPN</dt>
-                <dd>{idVal(detail.performerOrg, "hcpn") || "—"}</dd>
-                <dt>Address</dt>
-                <dd>{formatAddress(detail.performerOrg?.address) || "—"}</dd>
-                <dt>Contact Number</dt>
-                <dd>{firstPhone(detail.performerOrg?.telecom) || "—"}</dd>
-                <dt>Email</dt>
-                <dd>{firstEmail(detail.performerOrg?.telecom) || "—"}</dd>
-                <dt style={{ gridColumn: "1/-1", color: "var(--ink)", fontWeight: 700, marginTop: 8, marginBottom: 4, borderTop: "1px solid #e0e0e0", paddingTop: 8 }}>
-                  Receiving Practitioner
-                </dt>
-                <dt>Name</dt>
-                <dd>{humanName(detail.performerPractitioner?.name) || "—"}</dd>
-                <dt>Role</dt>
-                <dd>{detail.performerRole?.code?.[0]?.coding?.[0]?.display || detail.performerRole?.code?.[0]?.text || "—"}</dd>
-                <dt>Specialty</dt>
-                <dd>{specialtyText(detail.performerRole)}</dd>
-                <dt>PRC</dt>
-                <dd>{idVal(detail.performerPractitioner, "prc") || "—"}</dd>
-              </dl>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, alignItems: "start" }}>
+            <div>
+              {activeTab === "referral" && (
+                <>
+                  {/* Referral summary */}
+                  <Section title="Referral summary" resource="ServiceRequest">
+                    <dl className="kv">
+                      <dt>Referral ID</dt>
+                      <dd>{sr.requisition?.value || sr.identifier?.[0]?.value || sr.id}</dd>
+                      <dt>Status</dt>
+                      <dd><span className={`badge ${status}`}>{status}</span></dd>
+                      <dt>Intent</dt>
+                      <dd>{sr.intent || "—"}</dd>
+                      <dt>Priority</dt>
+                      <dd>{sr.priority || "—"}</dd>
+                      <dt>Referral Category</dt>
+                      <dd>{sr.category?.[0]?.coding?.[0]?.display || sr.category?.[0]?.text || "—"}</dd>
+                      <dt>Reason for Referral (Service Type)</dt>
+                      <dd>{sr.reasonCode?.[0]?.coding?.[0]?.display || sr.reasonCode?.[0]?.text || "—"}</dd>
+                      <dt>Clinical Reason</dt>
+                      <dd>{sr.reasonCode?.[0]?.text || "—"}</dd>
+                      <dt>Date of Referral</dt>
+                      <dd>{sr.authoredOn ? new Date(sr.authoredOn).toLocaleString() : "—"}</dd>
+                      <dt>Occurrence</dt>
+                      <dd>{sr.occurrenceDateTime
+                        ? new Date(sr.occurrenceDateTime).toLocaleString()
+                        : sr.occurrencePeriod?.start
+                        ? new Date(sr.occurrencePeriod.start).toLocaleString()
+                        : "—"}</dd>
+                      <dt>Notes</dt>
+                      <dd>{sr.note?.[0]?.text || "—"}</dd>
+                    </dl>
+                  </Section>
+
+                  {/* Facilities & Practitioners */}
+                  <Section title="Facilities & Practitioners" resource="Organization / PractitionerRole / Practitioner">
+                    <div className="grid two">
+                      <dl className="kv" style={{ margin: 0 }}>
+                        <dt style={{ gridColumn: "1/-1", color: "var(--ink)", fontWeight: 700, marginBottom: 4 }}>
+                          Initiating (Requester)
+                        </dt>
+                        <dt>Organization</dt>
+                        <dd>{detail.requesterOrg?.name || refId(sr.requester?.reference || "") || "—"}</dd>
+                        <dt>NHFR</dt>
+                        <dd>{idVal(detail.requesterOrg, "nhfr") || "—"}</dd>
+                        <dt>HCPN</dt>
+                        <dd>{idVal(detail.requesterOrg, "hcpn") || "—"}</dd>
+                        <dt>Address</dt>
+                        <dd>{formatAddress(detail.requesterOrg?.address) || "—"}</dd>
+                        <dt>Contact Number</dt>
+                        <dd>{firstPhone(detail.requesterOrg?.telecom) || "—"}</dd>
+                        <dt>Email</dt>
+                        <dd>{firstEmail(detail.requesterOrg?.telecom) || "—"}</dd>
+                        <dt style={{ gridColumn: "1/-1", color: "var(--ink)", fontWeight: 700, marginTop: 8, marginBottom: 4, borderTop: "1px solid #e0e0e0", paddingTop: 8 }}>
+                          Referring Practitioner
+                        </dt>
+                        <dt>Name</dt>
+                        <dd>{humanName(detail.requesterPractitioner?.name) || "—"}</dd>
+                        <dt>Role</dt>
+                        <dd>{detail.requesterRole?.code?.[0]?.coding?.[0]?.display || detail.requesterRole?.code?.[0]?.text || "—"}</dd>
+                        <dt>Specialty</dt>
+                        <dd>{specialtyText(detail.requesterRole)}</dd>
+                        <dt>PRC</dt>
+                        <dd>{idVal(detail.requesterPractitioner, "prc") || "—"}</dd>
+                      </dl>
+                      <dl className="kv" style={{ margin: 0 }}>
+                        <dt style={{ gridColumn: "1/-1", color: "var(--ink)", fontWeight: 700, marginBottom: 4 }}>
+                          Receiving (Performer)
+                        </dt>
+                        <dt>Organization</dt>
+                        <dd>{detail.performerOrg?.name || refId(sr.performer?.[0]?.reference || "") || "—"}</dd>
+                        <dt>NHFR</dt>
+                        <dd>{idVal(detail.performerOrg, "nhfr") || "—"}</dd>
+                        <dt>HCPN</dt>
+                        <dd>{idVal(detail.performerOrg, "hcpn") || "—"}</dd>
+                        <dt>Address</dt>
+                        <dd>{formatAddress(detail.performerOrg?.address) || "—"}</dd>
+                        <dt>Contact Number</dt>
+                        <dd>{firstPhone(detail.performerOrg?.telecom) || "—"}</dd>
+                        <dt>Email</dt>
+                        <dd>{firstEmail(detail.performerOrg?.telecom) || "—"}</dd>
+                        <dt style={{ gridColumn: "1/-1", color: "var(--ink)", fontWeight: 700, marginTop: 8, marginBottom: 4, borderTop: "1px solid #e0e0e0", paddingTop: 8 }}>
+                          Receiving Practitioner
+                        </dt>
+                        <dt>Name</dt>
+                        <dd>{humanName(detail.performerPractitioner?.name) || "—"}</dd>
+                        <dt>Role</dt>
+                        <dd>{detail.performerRole?.code?.[0]?.coding?.[0]?.display || detail.performerRole?.code?.[0]?.text || "—"}</dd>
+                        <dt>Specialty</dt>
+                        <dd>{specialtyText(detail.performerRole)}</dd>
+                        <dt>PRC</dt>
+                        <dd>{idVal(detail.performerPractitioner, "prc") || "—"}</dd>
+                      </dl>
+                    </div>
+                  </Section>
+
+                </>
+              )}
+
+              {activeTab === "clinical" && (
+                <>
+                  {/* Observations / Vitals */}
+                  <Section title="Vitals & Observations" fhirBadge="Observation" count={detail.observations.length}>
+                    {detail.observations.length > 0
+                      ? <VitalsPanel observations={detail.observations} />
+                      : <p className="muted">No vital signs or observations recorded.</p>}
+                  </Section>
+
+                  {/* Clinical Summary */}
+                  <Section title="Clinical Summary" fhirBadge="Condition · Procedure" count={detail.conditions.length + detail.procedures.length}>
+                    <ClinicalPanel conditions={detail.conditions} procedures={detail.procedures} />
+                  </Section>
+
+                  {/* Procedures */}
+                  {detail.procedures.length > 0 && (
+                    <Section title={`Procedures (${detail.procedures.length})`} resource="Procedure">
+                      {detail.procedures.map((p, idx) => (
+                        <div key={p.id || idx} style={{ marginBottom: idx < detail.procedures.length - 1 ? 12 : 0, paddingBottom: idx < detail.procedures.length - 1 ? 12 : 0, borderBottom: idx < detail.procedures.length - 1 ? "1px solid #e0e0e0" : "none" }}>
+                          <dl className="kv">
+                            <dt>Code</dt>
+                            <dd>{p.code?.coding?.[0]?.display || p.code?.text || "—"}</dd>
+                            <dt>Status</dt>
+                            <dd>{p.status || "—"}</dd>
+                            <dt>Performed</dt>
+                            <dd>{p.performedDateTime
+                              ? new Date(p.performedDateTime).toLocaleString()
+                              : p.performedPeriod?.start
+                              ? new Date(p.performedPeriod.start).toLocaleString()
+                              : "—"}</dd>
+                            <dt>Notes</dt>
+                            <dd>{p.note?.[0]?.text || "—"}</dd>
+                          </dl>
+                        </div>
+                      ))}
+                    </Section>
+                  )}
+
+                  {/* Diagnostic Reports */}
+                  <Section title={`Diagnostic Reports / Lab Results (${detail.diagnosticReports.length})`} resource="DiagnosticReport">
+                    {detail.diagnosticReports.length > 0 ? detail.diagnosticReports.map((dr, idx) => (
+                        <div key={dr.id || idx} style={{ marginBottom: idx < detail.diagnosticReports.length - 1 ? 12 : 0, paddingBottom: idx < detail.diagnosticReports.length - 1 ? 12 : 0, borderBottom: idx < detail.diagnosticReports.length - 1 ? "1px solid #e0e0e0" : "none" }}>
+                          <dl className="kv">
+                            <dt>Code</dt>
+                            <dd>{dr.code?.coding?.[0]?.display || dr.code?.text || "—"}</dd>
+                            <dt>Status</dt>
+                            <dd>{dr.status || "—"}</dd>
+                            <dt>Title</dt>
+                            <dd>{dr.presentedForm?.[0]?.title || "—"}</dd>
+                            <dt>Conclusion</dt>
+                            <dd>{dr.conclusion || "—"}</dd>
+                          </dl>
+                        </div>
+                      )) : <p className="muted">No diagnostic reports / lab results recorded.</p>}
+                  </Section>
+                </>
+              )}
             </div>
-          </Section>
 
-          {/* Patient */}
-          <Section title="Patient" fhirBadge="Patient">
-            {detail.patient ? <PatientCard patient={detail.patient} /> : <p className="muted">No patient data available.</p>}
-          </Section>
-
-          {/* Provenance */}
-          <Section title="Provenance" resource="Provenance">
-            {detail.provenance ? (
-              <dl className="kv">
-                <dt>Recorded</dt>
-                <dd>{detail.provenance.recorded
-                  ? new Date(detail.provenance.recorded).toLocaleString() : "—"}</dd>
-                <dt>Author</dt>
-                <dd>{detail.provenance.agent?.[0]?.who?.reference || "—"}</dd>
-                <dt>Signature</dt>
-                <dd>{detail.provenance.signature?.[0]?.data
-                  ? `present (${detail.provenance.signature[0].sigFormat || "signed"})`
-                  : "—"}</dd>
-              </dl>
-            ) : <p className="muted">No provenance data.</p>}
-          </Section>
-
-          {/* Encounter */}
-          {detail.encounter && (
-            <Section title="Encounter" resource="Encounter">
-              <dl className="kv">
-                <dt>Status</dt>
-                <dd>{detail.encounter.status || "—"}</dd>
-                <dt>Class</dt>
-                <dd>{detail.encounter.class?.display || detail.encounter.class?.code || "—"}</dd>
-                <dt>Period</dt>
-                <dd>
-                  {detail.encounter.period?.start && detail.encounter.period?.end
-                    ? `${new Date(detail.encounter.period.start).toLocaleString()} - ${new Date(detail.encounter.period.end).toLocaleString()}`
-                    : detail.encounter.period?.start
-                    ? new Date(detail.encounter.period.start).toLocaleString()
-                    : "—"}
-                </dd>
-              </dl>
-            </Section>
-          )}
-
-          {/* Observations / Vitals */}
-          <Section title="Vitals & Observations" fhirBadge="Observation" count={detail.observations.length}>
-            {detail.observations.length > 0
-              ? <VitalsPanel observations={detail.observations} />
-              : <p className="muted">No vital signs or observations recorded.</p>}
-          </Section>
-
-          {/* Clinical Summary — Chief Complaint, History, Impression, Treatment */}
-          <Section title="Clinical Summary" fhirBadge="Condition · Procedure" count={detail.conditions.length + detail.procedures.length}>
-            <ClinicalPanel conditions={detail.conditions} procedures={detail.procedures} />
-          </Section>
-
-          {/* Procedures (raw FHIR view for any additional procedures) */}
-          {detail.procedures.length > 0 && (
-            <Section title={`Procedures (${detail.procedures.length})`} resource="Procedure">
-              {detail.procedures.map((p, idx) => (
-                <div key={p.id || idx} style={{ marginBottom: idx < detail.procedures.length - 1 ? 12 : 0, paddingBottom: idx < detail.procedures.length - 1 ? 12 : 0, borderBottom: idx < detail.procedures.length - 1 ? "1px solid #e0e0e0" : "none" }}>
+            <div style={{ position: "sticky", top: 16 }}>
+              {/* Patient */}
+              <Section title="Patient" fhirBadge="Patient">
+                {detail.patient ? <PatientCard patient={detail.patient} /> : <p className="muted">No patient data available.</p>}
+              </Section>
+              <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+                <TaskHistory serviceRequestId={sr.id} />
+              </div>
+              {/* Encounter — moved to right sidebar under Task History */}
+              {detail.encounter && (
+                <Section title="Encounter" resource="Encounter">
                   <dl className="kv">
-                    <dt>Code</dt>
-                    <dd>{p.code?.coding?.[0]?.display || p.code?.text || "—"}</dd>
                     <dt>Status</dt>
-                    <dd>{p.status || "—"}</dd>
-                    <dt>Performed</dt>
-                    <dd>{p.performedDateTime
-                      ? new Date(p.performedDateTime).toLocaleString()
-                      : p.performedPeriod?.start
-                      ? new Date(p.performedPeriod.start).toLocaleString()
+                    <dd>{detail.encounter.status || "—"}</dd>
+                    <dt>Class</dt>
+                    <dd>{detail.encounter.class?.display || detail.encounter.class?.code || "—"}</dd>
+                    <dt>Period</dt>
+                    <dd>
+                      {detail.encounter.period?.start && detail.encounter.period?.end
+                        ? `${new Date(detail.encounter.period.start).toLocaleString()} - ${new Date(detail.encounter.period.end).toLocaleString()}`
+                        : detail.encounter.period?.start
+                        ? new Date(detail.encounter.period.start).toLocaleString()
+                        : "—"}
+                    </dd>
+                  </dl>
+                </Section>
+              )}
+              {/* Provenance — moved to right sidebar */}
+              <Section title="Provenance" resource="Provenance">
+                {detail.provenance ? (
+                  <dl className="kv">
+                    <dt>Recorded</dt>
+                    <dd>{detail.provenance.recorded
+                      ? new Date(detail.provenance.recorded).toLocaleString() : "—"}</dd>
+                    <dt>Author</dt>
+                    <dd>{detail.provenance.agent?.[0]?.who?.reference || "—"}</dd>
+                    <dt>Signature</dt>
+                    <dd>{detail.provenance.signature?.[0]?.data
+                      ? `present (${detail.provenance.signature[0].sigFormat || "signed"})`
                       : "—"}</dd>
-                    <dt>Notes</dt>
-                    <dd>{p.note?.[0]?.text || "—"}</dd>
                   </dl>
-                </div>
-              ))}
-            </Section>
-          )}
-
-          {/* Diagnostic Reports */}
-          <Section title={`Diagnostic Reports / Lab Results (${detail.diagnosticReports.length})`} resource="DiagnosticReport">
-            {detail.diagnosticReports.length > 0 ? detail.diagnosticReports.map((dr, idx) => (
-                <div key={dr.id || idx} style={{ marginBottom: idx < detail.diagnosticReports.length - 1 ? 12 : 0, paddingBottom: idx < detail.diagnosticReports.length - 1 ? 12 : 0, borderBottom: idx < detail.diagnosticReports.length - 1 ? "1px solid #e0e0e0" : "none" }}>
-                  <dl className="kv">
-                    <dt>Code</dt>
-                    <dd>{dr.code?.coding?.[0]?.display || dr.code?.text || "—"}</dd>
-                    <dt>Status</dt>
-                    <dd>{dr.status || "—"}</dd>
-                    <dt>Title</dt>
-                    <dd>{dr.presentedForm?.[0]?.title || "—"}</dd>
-                    <dt>Conclusion</dt>
-                    <dd>{dr.conclusion || "—"}</dd>
-                  </dl>
-                </div>
-              )) : <p className="muted">No diagnostic reports / lab results recorded.</p>}
-          </Section>
-
-          </div>
-          <div style={{ position: "sticky", top: 16 }}>
-            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-              <TaskHistory serviceRequestId={sr.id} />
+                ) : <p className="muted">No provenance data.</p>}
+              </Section>
             </div>
           </div>
-        </div>
+        </>
       )}
     </>
   );

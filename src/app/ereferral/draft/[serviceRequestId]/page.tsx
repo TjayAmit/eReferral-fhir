@@ -214,13 +214,39 @@ export default function DraftReferralViewPage() {
             <div className="card">
               <div className="section-header"><div className="section-title-wrap"><span className="section-indicator" /><h3 className="section-title" style={{ fontSize: 15 }}>Patient</h3></div></div>
               {patient ? (
-                <dl className="kv">
-                  <dt>Name</dt><dd>{humanName(patient.name)}</dd>
-                  <dt>Gender / Age</dt><dd>{[patient.gender, age != null ? `${age} yrs` : null].filter(Boolean).join(" · ") || "—"}</dd>
-                  <dt>PhilHealth</dt><dd>{idVal(patient, "philhealth-id") || "—"}</dd>
-                  <dt>Contact</dt><dd>{firstPhone(patient.telecom)}</dd>
-                  <dt>Address</dt><dd>{formatAddress(patient.address)}</dd>
-                </dl>
+                <div className="patient-card-v2">
+                  <div className="patient-row">
+                    <div className={`patient-avatar-v2 ${(patient.gender || "").toLowerCase() === "male" ? "gender-m" : (patient.gender || "").toLowerCase() === "female" ? "gender-f" : ""}`}>
+                      {humanName(patient.name).split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="patient-info">
+                      <div className="patient-name-v2">{humanName(patient.name)}</div>
+                      <div className="patient-badges">
+                        {patient.gender && <span className="pb">{patient.gender}</span>}
+                        {age !== null && <span className="pb">{age} yrs</span>}
+                        {patient.birthDate && <span className="pb">Born {new Date(patient.birthDate).toLocaleDateString()}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>PhilHealth</span>
+                      <span style={{ fontSize: 13, color: "#111827" }}>{idVal(patient, "philhealth") || "Not provided"}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>PhilSys</span>
+                      <span style={{ fontSize: 13, color: "#111827" }}>{idVal(patient, "philsys") || "Not provided"}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>Address</span>
+                      <span style={{ fontSize: 13, color: "#111827" }}>{formatAddress(patient.address) || "Not provided"}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>Contact</span>
+                      <span style={{ fontSize: 13, color: "#111827" }}>{firstPhone(patient.telecom) || "Not provided"}</span>
+                    </div>
+                  </div>
+                </div>
               ) : <p className="muted">No patient linked.</p>}
             </div>
 
