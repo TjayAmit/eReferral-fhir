@@ -93,13 +93,17 @@ export default function PractitionerRolesPage() {
     return org?.name || `Organization/${orgId}`;
   }
 
-  function getPractitionerCount(roleId: string): number {
-    return practitioners.filter((p) =>
-      roles.some((r) =>
-        r.id === roleId &&
-        r.practitioner?.reference?.includes(p.id)
-      )
-    ).length;
+  // A PractitionerRole references exactly one practitioner. Resolve its name from the
+  // loaded practitioners list, falling back to the reference's display / id so it shows
+  // even when the practitioner is beyond the first 100 results.
+  function getPractitionerName(role: any): string {
+    const ref = role.practitioner?.reference;
+    if (!ref) return "—";
+    const pid = ref.split("/").pop();
+    const p = practitioners.find((x) => x.id === pid);
+    if (!p) return role.practitioner?.display || `Practitioner/${pid}`;
+    const n = p.name?.[0];
+    return n ? [...(n.prefix || []), ...(n.given || []), n.family].filter(Boolean).join(" ") : `Practitioner/${pid}`;
   }
 
   if (!ready || !user || user.role !== "admin") {
@@ -171,7 +175,7 @@ export default function PractitionerRolesPage() {
                 <tr>
                   <th>Resource ID</th>
                   <th>Role Name</th>
-                  <th>Practitioners</th>
+                  <th>Practitioner</th>
                   <th>Organization</th>
                 </tr>
               </thead>
@@ -180,7 +184,7 @@ export default function PractitionerRolesPage() {
                   <tr key={r.id}>
                     <td><code>{r.id}</code></td>
                     <td>{getRoleName(r)}</td>
-                    <td>{getPractitionerCount(r.id)}</td>
+                    <td>{getPractitionerName(r)}</td>
                     <td>{getOrganizationName(r)}</td>
                   </tr>
                 ))}

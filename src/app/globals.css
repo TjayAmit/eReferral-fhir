@@ -783,6 +783,47 @@ tr.clickable:hover { background: #f0f6ff; cursor: pointer; }
 .obs-table tbody td strong { color: var(--ink); font-weight: 700; }
 .obs-sep { color: var(--muted); margin: 0 4px; }
 
+/* ---- Clinical Panel (incoming referral detail) ---- */
+.clinical-panel { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+@media (max-width: 640px) { .clinical-panel { grid-template-columns: 1fr; } }
+
+.clinical-card {
+  background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  position: relative; overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+.clinical-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+}
+.clinical-complaint::before  { background: #f59e0b; }
+.clinical-history::before    { background: #8b5cf6; }
+.clinical-impression::before { background: #ef4444; }
+.clinical-treatment::before  { background: #14b8a6; }
+
+.clinical-hd {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.clinical-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted);
+}
+.clinical-ref {
+  font-size: 10px; font-weight: 700; color: var(--brand); background: #eef4ff;
+  padding: 1px 6px; border-radius: 4px;
+}
+.clinical-badge {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  color: #92400e; background: #fef3c7; padding: 1px 7px; border-radius: 999px;
+}
+.clinical-body { display: flex; flex-direction: column; gap: 6px; }
+.clinical-value {
+  font-size: 14px; color: var(--ink); font-weight: 500; line-height: 1.5;
+}
+.clinical-sub {
+  font-size: 13px; color: var(--muted); line-height: 1.5;
+  padding-top: 8px; border-top: 1px dashed var(--line);
+}
+
 /* ---- Incoming Referrals Header ---- */
 .incoming-header {
   background: linear-gradient(135deg, #0b6bcb 0%, #084e95 100%);

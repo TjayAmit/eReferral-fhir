@@ -130,6 +130,7 @@ export async function fhirDelete(resourceType: string, id: string, baseUrl?: str
     method: "DELETE",
     headers: { Accept: FHIR_JSON },
   });
+  
   return parse(res);
 }
 
@@ -148,5 +149,6 @@ export async function expandValueSet(url: string) {
   const res = await fetch(`${TX_BASE}/ValueSet/$expand?url=${encodeURIComponent(url)}`, {
     headers: { Accept: FHIR_JSON },
   });
+
   return parse(res);
 }

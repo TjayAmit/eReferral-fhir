@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import {
-  listIncomingTasks, patientEverything, patchTask, FhirError,
+  fhirGet, patientEverything, fhirPost, FhirError,
 } from "@/lib/fhir";
 import {
-  extractReferral, ReferralView, ACTION_POINTS, actionPatch,
-  humanName, formatAddress, firstPhone,
+  extractReferral, ReferralView, ACTION_POINTS,
+  humanName, formatAddress, firstPhone, latestTask, buildNextTask,
 } from "@/lib/referral";
 
 export default function InboxPage() {
@@ -19,8 +19,19 @@ export default function InboxPage() {
     setLoading(true);
     setError(null);
     try {
-      const b = await listIncomingTasks();
-      setTasks((b.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Task"));
+      const b = await fhirGet(
+        "Task?_include=Task:focus&_include=Task:patient&_sort=-authored-on&_count=50"
+      );
+      const allTasks = (b.entry || [])
+        .map((e: any) => e.resource)
+        .filter((r: any) => r?.resourceType === "Task");
+      const byFocus = new Map<string, any[]>();
+      for (const t of allTasks) {
+        const srRef = t.focus?.reference || "";
+        if (!byFocus.has(srRef)) byFocus.set(srRef, []);
+        byFocus.get(srRef)!.push(t);
+      }
+      setTasks(Array.from(byFocus.values()).map((arr) => latestTask(arr)!));
     } catch (e) {
       setError(e instanceof FhirError ? e.message : String(e));
     } finally {
@@ -34,7 +45,7 @@ export default function InboxPage() {
     <>
       <h1>Use Case 2 — Retrieve & Action Points</h1>
       <p className="sub">
-        Discover incoming referrals (<code>Task?status=requested</code>), open one to retrieve the whole
+        Discover incoming referrals, open one to retrieve the whole
         eReferral as a single Bundle, then update the action point.
       </p>
 
@@ -42,14 +53,14 @@ export default function InboxPage() {
         <button className="secondary" onClick={loadTasks} disabled={loading}>
           {loading ? "Loading…" : "Refresh inbox"}
         </button>
-        <span className="muted">{tasks.length} referral task(s) requested</span>
+        <span className="muted">{tasks.length} referral(s)</span>
       </div>
 
       {error && <div className="alert err">❌ {error}</div>}
 
       {!selected && (
         <div className="card">
-          {tasks.length === 0 && !loading && <p className="muted">No referrals with status “requested”.</p>}
+          {tasks.length === 0 && !loading && <p className="muted">No referrals found.</p>}
           {tasks.length > 0 && (
             <table>
               <thead><tr><th>Referral</th><th>Patient</th><th>Time Called (2.16)</th><th>Status</th></tr></thead>
@@ -74,7 +85,12 @@ export default function InboxPage() {
           onBack={() => setSelected(null)}
           onChanged={(updated) => {
             setSelected(updated);
-            setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+            setTasks((prev) => {
+              const srRef = updated.focus?.reference;
+              const sameSr = prev.filter((t) => t.focus?.reference === srRef);
+              const others = prev.filter((t) => t.focus?.reference !== srRef);
+              return [...others, latestTask([...sameSr, updated])!];
+            });
           }}
         />
       )}
@@ -119,7 +135,8 @@ function ReferralDetail({
     setNotice(null);
     setError(null);
     try {
-      const updated = await patchTask(task.id, actionPatch(status, reason));
+      const newTask = buildNextTask(task, status, reason);
+      const updated = await fhirPost("Task", newTask);
       setNotice(`Action point updated → ${status}`);
       onChanged(updated);
     } catch (e) {

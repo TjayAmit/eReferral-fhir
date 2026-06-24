@@ -66,6 +66,7 @@ export default function SubmitPage() {
   const [practitioners, setPractitioners] = useState<any[]>([]);
   const [practitionerRoles, setPractitionerRoles] = useState<any[]>([]);
   const [selectedReceivingRole, setSelectedReceivingRole] = useState<any>(null);
+  const [selectedReceivingPractitioner, setSelectedReceivingPractitioner] = useState<any>(null);
   const [input, setInput] = useState<ClinicalInput>(makeInitialInput);
   const [showJson, setShowJson] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -102,17 +103,37 @@ export default function SubmitPage() {
     set("selectedReceivingRoleId", "");
     set("selectedReceivingPractitionerId", "");
     setSelectedReceivingRole(null);
+    setSelectedReceivingPractitioner(null);
   }, [input.selectedReceivingOrgId]);
 
-  // Fetch the selected PractitionerRole resource
+  // Fetch the selected PractitionerRole resource and auto-populate practitioner.
+  // The practitioner is fetched directly from the role's reference (not the bounded
+  // pre-loaded list) so a practitioner outside the first 100 still resolves.
   useEffect(() => {
     if (!input.selectedReceivingRoleId) {
       setSelectedReceivingRole(null);
+      setSelectedReceivingPractitioner(null);
+      set("selectedReceivingPractitionerId", "");
       return;
     }
     fhirGet(`PractitionerRole/${input.selectedReceivingRoleId}`)
-      .then((r) => setSelectedReceivingRole(r))
-      .catch(() => setSelectedReceivingRole(null));
+      .then((r) => {
+        setSelectedReceivingRole(r);
+        const practRef = r?.practitioner?.reference;
+        const practId = practRef?.split("/").pop() || "";
+        set("selectedReceivingPractitionerId", practId);
+        if (practRef) {
+          fhirGet(practRef)
+            .then((p) => setSelectedReceivingPractitioner(p?.resourceType === "Practitioner" ? p : null))
+            .catch(() => setSelectedReceivingPractitioner(null));
+        } else {
+          setSelectedReceivingPractitioner(null);
+        }
+      })
+      .catch(() => {
+        setSelectedReceivingRole(null);
+        setSelectedReceivingPractitioner(null);
+      });
   }, [input.selectedReceivingRoleId]);
 
   const set = (path: string, value: any) =>
@@ -131,10 +152,14 @@ export default function SubmitPage() {
     [orgs, input.selectedReceivingOrgId]
   );
 
-  // Selected receiving practitioner — wired into the receiving PractitionerRole (Task.owner)
+  // Selected receiving practitioner — wired into the receiving PractitionerRole (Task.owner).
+  // Prefer the resource fetched directly from the role reference; fall back to the list.
   const receivingPractitioner = useMemo(
-    () => practitioners.find((p) => p.id === input.selectedReceivingPractitionerId) || null,
-    [practitioners, input.selectedReceivingPractitionerId]
+    () =>
+      selectedReceivingPractitioner ||
+      practitioners.find((p) => p.id === input.selectedReceivingPractitionerId) ||
+      null,
+    [selectedReceivingPractitioner, practitioners, input.selectedReceivingPractitionerId]
   );
 
   // Requester resources come straight from the logged-in user's session
@@ -170,21 +195,8 @@ export default function SubmitPage() {
   // PractitionerRoles — filtered by selected receiving organization
   const receivingRoleOptions = practitionerRoles;
 
-  // Practitioners belonging to the selected receiving org, via PractitionerRole
-  const receivingPractitionerOptions = input.selectedReceivingOrgId
-    ? (() => {
-        const ids = new Set(
-          practitionerRoles
-            .map((r) => {
-              const practRef = r.practitioner?.reference;
-              const practId = r.practitioner?.id;
-              return practRef?.split("/").pop() || practId;
-            })
-            .filter(Boolean)
-        );
-        return practitioners.filter((p) => ids.has(p.id));
-      })()
-    : [];
+  // Practitioner linked to the selected receiving PractitionerRole
+  const receivingPractitionerOption = selectedReceivingRole ? receivingPractitioner : null;
 
   return (
     <>
@@ -258,14 +270,18 @@ export default function SubmitPage() {
             <select
               value={input.selectedReceivingPractitionerId}
               onChange={(e) => set("selectedReceivingPractitionerId", e.target.value)}
-              disabled={!input.selectedReceivingOrgId}
+              disabled={!input.selectedReceivingRoleId}
             >
               <option value="">
-                {input.selectedReceivingOrgId ? "— assign on receipt —" : "— select receiving org first —"}
+                {input.selectedReceivingRoleId
+                  ? (receivingPractitionerOption ? practName(receivingPractitionerOption) : "— no practitioner —")
+                  : "— select role first —"}
               </option>
-              {receivingPractitionerOptions.map((p) => (
-                <option key={p.id} value={p.id}>{practName(p)}</option>
-              ))}
+              {receivingPractitionerOption && (
+                <option key={receivingPractitionerOption.id} value={receivingPractitionerOption.id}>
+                  {practName(receivingPractitionerOption)}
+                </option>
+              )}
             </select>
           </div>
         </div>

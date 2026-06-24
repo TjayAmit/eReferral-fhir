@@ -396,3 +396,32 @@ export function actionPatch(status: string, reason?: string) {
   if (reason) ops.push({ op: "add", path: "/statusReason", value: { text: reason } });
   return ops;
 }
+
+/** Pick the most recently authored Task from a list. */
+export function latestTask(tasks: any[]): any | null {
+  if (!tasks.length) return null;
+  return [...tasks].sort(
+    (a, b) =>
+      new Date(b.lastModified || b.authoredOn || 0).getTime() -
+      new Date(a.lastModified || a.authoredOn || 0).getTime()
+  )[0];
+}
+
+/** Build a new Task for the next status, preserving references. */
+export function buildNextTask(prev: any, status: string, reason?: string): any {
+  const now = new Date().toISOString();
+  return {
+    resourceType: "Task",
+    meta: prev.meta,
+    status,
+    intent: prev.intent,
+    code: prev.code,
+    focus: prev.focus,
+    for: prev.for,
+    authoredOn: now,
+    lastModified: now,
+    requester: prev.requester,
+    owner: prev.owner,
+    note: reason ? [{ text: reason }] : prev.note,
+  };
+}

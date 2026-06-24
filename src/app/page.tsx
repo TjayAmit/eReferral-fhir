@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-import { fhirGet, patientEverything, patchTask, FhirError } from "@/lib/fhir";
+import { fhirGet, patientEverything, fhirPost, FhirError } from "@/lib/fhir";
 import {
-  extractReferral, ReferralView, ACTION_POINTS, actionPatch,
-  humanName, formatAddress, firstPhone,
+  extractReferral, ReferralView, ACTION_POINTS,
+  humanName, formatAddress, firstPhone, latestTask, buildNextTask,
 } from "@/lib/referral";
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -118,7 +118,8 @@ function ReferralDetail({
     }
     setBusy(status); setNotice(null); setError(null);
     try {
-      const updated = await patchTask(task.id, actionPatch(status, reason));
+      const newTask = buildNextTask(task, status, reason);
+      const updated = await fhirPost("Task", newTask);
       setNotice(`Action point updated → ${status}`);
       onChanged(updated);
     } catch (e) {
@@ -291,15 +292,18 @@ function PractitionerHome({ user }: { user: NonNullable<ReturnType<typeof useAut
       );
 
       // Task lookup by the SR id it focuses on
-      const taskBySrId = new Map<string, any>();
+      const tasksBySrId = new Map<string, any[]>();
       for (const t of all.filter((r: any) => r.resourceType === "Task")) {
         const srId = refId(t.focus?.reference || "");
-        if (srId) taskBySrId.set(srId, t);
+        if (srId) {
+          if (!tasksBySrId.has(srId)) tasksBySrId.set(srId, []);
+          tasksBySrId.get(srId)!.push(t);
+        }
       }
 
       setItems(srs.map((sr: any) => ({
         sr,
-        task: taskBySrId.get(sr.id) || null,
+        task: latestTask(tasksBySrId.get(sr.id) || []) || null,
         patient: patientById.get(refId(sr.subject?.reference || "")) || null,
       })));
     } catch (e) {

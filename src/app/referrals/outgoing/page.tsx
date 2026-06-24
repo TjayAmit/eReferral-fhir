@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import { useAuth } from "@/lib/auth";
@@ -10,33 +9,6 @@ import { fhirGet, FhirError } from "@/lib/fhir";
 import { humanName } from "@/lib/referral";
 
 const STATUSES = ["requested", "received", "accepted", "rejected", "completed"] as const;
-
-function StatusFilter({ value, counts, onChange }: {
-  value: string;
-  counts: Record<string, number>;
-  onChange: (s: string) => void;
-}) {
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  return (
-    <div className="status-filters">
-      <button
-        className={`status-pill${value === "" ? " active-all" : ""}`}
-        onClick={() => onChange("")}
-      >
-        All ({total})
-      </button>
-      {STATUSES.map((s) => (
-        <button
-          key={s}
-          className={`status-pill${value === s ? ` active-${s}` : ""}`}
-          onClick={() => onChange(s)}
-        >
-          {s.charAt(0).toUpperCase() + s.slice(1)} ({counts[s] ?? 0})
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function buildIndex(bundle: any): Map<string, any> {
   const map = new Map<string, any>();
@@ -78,10 +50,13 @@ export default function OutgoingReferralsPage() {
 
   useEffect(() => {
     if (ready && user) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, user]);
 
   useEffect(() => { setPage(1); }, [query, statusFilter]);
 
+  // Persist the requested-referral fetch: list Tasks requested by this
+  // practitioner role, with their ServiceRequest (focus) and Patient included.
   async function load() {
     if (!practitionerRoleId) return;
     setLoading(true);
@@ -152,31 +127,48 @@ export default function OutgoingReferralsPage() {
 
   return (
     <>
-      <AppPageHeader
-        items={[{ label: "Home", href: "/" }, { label: "Requested Referrals" }]}
-        title="Requested Referrals"
-        actions={
-          <>
+      <AppPageHeader items={[{ label: "Home", href: "/" }, { label: "Requested Referrals" }]} title="Requested Referrals" />
+
+      {/* Redesigned header — matches Incoming Referrals */}
+      <div className="incoming-header">
+        <div className="incoming-header-top">
+          <div>
+            <h1 className="incoming-header-title">Requested Referrals</h1>
+            <p className="incoming-header-sub">
+              Referrals requested by your practitioner role{" "}
+              <code style={{ background: "rgba(255,255,255,0.15)", padding: "1px 5px", borderRadius: 4, fontSize: 12 }}>
+                Task.requester = PractitionerRole/{practitionerRoleId}
+              </code>
+            </p>
+          </div>
+          <div className="incoming-header-actions">
             <input
               type="search"
               placeholder="Search referral, patient…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            <button className="secondary" onClick={load} disabled={loading}>
+            <button onClick={load} disabled={loading}>
               {loading ? "Loading…" : "Refresh"}
             </button>
-            <span className="muted">{filtered.length} referral(s)</span>
-          </>
-        }
-      />
-
-      <div className="filter-bar">
-        <span className="filter-bar-caption">
-          Referrals requested by your practitioner role
-          (<code>Task.requester = PractitionerRole/{practitionerRoleId}</code>).
-        </span>
-        <StatusFilter value={statusFilter} counts={statusCounts} onChange={setStatusFilter} />
+          </div>
+        </div>
+        <div className="incoming-stats">
+          <div className={`incoming-stat${statusFilter === "" ? " active" : ""}`} onClick={() => setStatusFilter("")}>
+            <div className="incoming-stat-n">{Object.values(statusCounts).reduce((a, b) => a + b, 0)}</div>
+            <div className="incoming-stat-l">All</div>
+          </div>
+          {STATUSES.map((s) => (
+            <div
+              key={s}
+              className={`incoming-stat${statusFilter === s ? " active" : ""}`}
+              onClick={() => setStatusFilter(s)}
+            >
+              <div className="incoming-stat-n">{statusCounts[s] ?? 0}</div>
+              <div className="incoming-stat-l">{s.charAt(0).toUpperCase() + s.slice(1)}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {error && <div className="alert err">❌ {error}</div>}
@@ -196,7 +188,6 @@ export default function OutgoingReferralsPage() {
                   <th>Priority</th>
                   <th>Status</th>
                   <th>Date</th>
-                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -205,22 +196,17 @@ export default function OutgoingReferralsPage() {
                   const refId = t.identifier?.[0]?.value || t.id;
                   const srId = sr?.id;
                   return (
-                    <tr key={t.id}>
+                    <tr
+                      key={t.id}
+                      className={srId ? "clickable" : undefined}
+                      onClick={srId ? () => router.push(`/referrals/outgoing/${srId}`) : undefined}
+                    >
                       <td><code>{refId}</code></td>
                       <td>{patientName(t)}</td>
                       <td>{srReason(sr)}</td>
                       <td>{t.priority || "—"}</td>
                       <td><span className={`badge ${t.status}`}>{t.status}</span></td>
                       <td>{t.authoredOn ? new Date(t.authoredOn).toLocaleDateString() : "—"}</td>
-                      <td>
-                        {srId ? (
-                          <Link href={`/referrals/outgoing/${srId}`} style={{ fontSize: "0.85rem" }}>
-                            View
-                          </Link>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}

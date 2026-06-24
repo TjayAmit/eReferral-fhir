@@ -57,8 +57,6 @@ const REFERRAL_CATEGORY: Record<string, { code: string; display: string; text: s
 
 // Placeholder professional signature (valid base64), as in the IG example.
 const SIGNATURE_DATA = "dGVzdHNpZ25hdHVyZWJhc2U2NA==";
-// Minimal valid 1-page PDF (base64) for the DiagnosticReport attachment.
-const PDF_STUB = "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoK";
 
 // ---------------------------------------------------------------------------
 // Input type (form-driven clinical data only — requester is from session)
@@ -411,7 +409,7 @@ export function buildReferralBundle(
     effectiveDateTime: eff,
     performer: [{ reference: submissionRoleRef }],
     conclusion: i.diagnostic.conclusion || undefined,
-    presentedForm: [{ title: i.diagnostic.title || undefined, data: PDF_STUB }],
+    presentedForm: [{ title: i.diagnostic.title || undefined }],
   };
   dr.text = narrative("DiagnosticReport", undefined, [`Urinalysis · ${esc(i.diagnostic.conclusion)}`]);
   entries.push(postEntry(drRef, dr, "DiagnosticReport"));
