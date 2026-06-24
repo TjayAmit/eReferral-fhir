@@ -32,6 +32,7 @@ function obsValue(o: any): string {
     const r = o.dataAbsentReason.coding?.[0];
     return `Not recorded — ${r?.display || r?.code || "unknown"}`;
   }
+
   if (o.component?.length) {
     return o.component.map((c: any) => {
       const code = c.code?.coding?.find((x: any) => x.system?.includes("loinc.org"))?.code;
@@ -39,6 +40,7 @@ function obsValue(o: any): string {
       return `${label} ${c.valueQuantity?.value ?? "—"}`.trim();
     }).join(" / ");
   }
+
   if (o.valueQuantity) return `${o.valueQuantity.value} ${o.valueQuantity.unit || ""}`.trim();
   if (o.valueString) return o.valueString;
   return "—";
@@ -245,7 +247,7 @@ export default function DraftReferralViewPage() {
                   </tbody>
                 </table>
               )}
-            </div>
+            </div>``
 
             {enc && (
               <div className="card">

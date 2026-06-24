@@ -192,11 +192,16 @@ export type BuildOptions = {
   existingDiagnosticReportId?: string;
 };
 
+function absUrl(base: string, path: string) {
+  return `${base.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+}
+
 export function buildReferralBundle(
   i: ClinicalInput,
   requester: RequesterResources,
   receiving: ReceivingResources,
   opts?: BuildOptions,
+  baseUrl?: string,
 ): any {
   const authored = toFhirDateTime(i.authoredOn);
   const eff = authored;
@@ -220,8 +225,22 @@ export function buildReferralBundle(
   const patientRef = i.patientId ? `Patient/${i.patientId}` : uuid();
   const existingSrId = opts?.existingServiceRequestId;
   const srRef = existingSrId ? `ServiceRequest/${existingSrId}` : uuid();
+  const srFullUrl = existingSrId && baseUrl ? absUrl(baseUrl, srRef) : srRef;
   const existingEncId = opts?.existingEncounterId;
   const encounterRef = existingEncId ? `Encounter/${existingEncId}` : uuid();
+  const encFullUrl = existingEncId && baseUrl ? absUrl(baseUrl, encounterRef) : encounterRef;
+  const existingChiefId = opts?.existingChiefConditionId;
+  const chiefRef = existingChiefId ? `Condition/${existingChiefId}` : uuid();
+  const chiefFullUrl = existingChiefId && baseUrl ? absUrl(baseUrl, chiefRef) : chiefRef;
+  const existingDxId = opts?.existingDxConditionId;
+  const impressionRef = existingDxId ? `Condition/${existingDxId}` : uuid();
+  const impressionFullUrl = existingDxId && baseUrl ? absUrl(baseUrl, impressionRef) : impressionRef;
+  const existingProcId = opts?.existingProcedureId;
+  const procRef = existingProcId ? `Procedure/${existingProcId}` : uuid();
+  const procFullUrl = existingProcId && baseUrl ? absUrl(baseUrl, procRef) : procRef;
+  const existingDrId = opts?.existingDiagnosticReportId;
+  const drRef = existingDrId ? `DiagnosticReport/${existingDrId}` : uuid();
+  const drFullUrl = existingDrId && baseUrl ? absUrl(baseUrl, drRef) : drRef;
   const taskRef = uuid();
   const provRef = uuid();
 
@@ -271,10 +290,6 @@ export function buildReferralBundle(
   // Practitioner, Organizations and PractitionerRoles already exist on the server;
   // they are referenced by literal id (see refs above) and are NOT re-submitted.
 
-  // Determine impressionRef early — referenced by ServiceRequest.reasonReference
-  const existingDxId = opts?.existingDxConditionId;
-  const impressionRef = existingDxId ? `Condition/${existingDxId}` : uuid();
-
   // ── ServiceRequest ───────────────────────────────────────────────────────
   const cat = REFERRAL_CATEGORY[i.referralCategory] || REFERRAL_CATEGORY.emergency;
   const sr: any = {
@@ -301,7 +316,7 @@ export function buildReferralBundle(
   ]);
   if (existingSrId) {
     sr.id = existingSrId;
-    entries.push(putEntry(srRef, sr, `ServiceRequest/${existingSrId}`));
+    entries.push(putEntry(srFullUrl, sr, `ServiceRequest/${existingSrId}`));
   } else {
     entries.push(postEntry(srRef, sr, "ServiceRequest"));
   }
@@ -322,8 +337,6 @@ export function buildReferralBundle(
   }
 
   // ── 9. Condition — chief complaint ───────────────────────────────────────
-  const existingChiefId = opts?.existingChiefConditionId;
-  const chiefRef = existingChiefId ? `Condition/${existingChiefId}` : uuid();
   if (!existingChiefId) {
     const chief: any = {
       resourceType: "Condition",
@@ -337,7 +350,7 @@ export function buildReferralBundle(
       note: i.clinicalHistory ? [{ text: i.clinicalHistory }] : undefined,
     };
     chief.text = narrative("Condition", undefined, [`Chief complaint: ${esc(i.chiefComplaint)}`]);
-    entries.push(postEntry(chiefRef, chief, "Condition"));
+    entries.push(postEntry(chiefFullUrl, chief, "Condition"));
   }
 
   // ── 10. Condition — working impression ───────────────────────────────────
@@ -358,7 +371,7 @@ export function buildReferralBundle(
       note: i.clinicalHistory ? [{ text: i.clinicalHistory }] : undefined,
     };
     impression.text = narrative("Condition", undefined, [`Working impression: ${esc(i.impression.text)}`]);
-    entries.push(postEntry(impressionRef, impression, "Condition"));
+    entries.push(postEntry(impressionFullUrl, impression, "Condition"));
   }
 
   // ── 11–16. Vital-sign Observations ───────────────────────────────────────
@@ -411,8 +424,6 @@ export function buildReferralBundle(
   }
 
   // ── 17. Procedure — treatment given ──────────────────────────────────────
-  const existingProcId = opts?.existingProcedureId;
-  const procRef = existingProcId ? `Procedure/${existingProcId}` : uuid();
   if (!existingProcId) {
     const procedure: any = {
       resourceType: "Procedure",
@@ -425,12 +436,10 @@ export function buildReferralBundle(
       note: i.treatment ? [{ text: i.treatment }] : undefined,
     };
     procedure.text = narrative("Procedure", undefined, [`Treatment: ${esc(i.treatment)}`]);
-    entries.push(postEntry(procRef, procedure, "Procedure"));
+    entries.push(postEntry(procFullUrl, procedure, "Procedure"));
   }
 
   // ── 18. DiagnosticReport (no profile in the IG example) ──────────────────
-  const existingDrId = opts?.existingDiagnosticReportId;
-  const drRef = existingDrId ? `DiagnosticReport/${existingDrId}` : uuid();
   if (!existingDrId) {
     const dr: any = {
       resourceType: "DiagnosticReport",
@@ -449,7 +458,7 @@ export function buildReferralBundle(
       presentedForm: [{ title: i.diagnostic.title || undefined }],
     };
     dr.text = narrative("DiagnosticReport", undefined, [`Urinalysis · ${esc(i.diagnostic.conclusion)}`]);
-    entries.push(postEntry(drRef, dr, "DiagnosticReport"));
+    entries.push(postEntry(drFullUrl, dr, "DiagnosticReport"));
   }
 
   // ── 19. Task (owner = receiving PractitionerRole, else Organization) ─────

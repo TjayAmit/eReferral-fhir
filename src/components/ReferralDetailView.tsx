@@ -485,6 +485,7 @@ export default function ReferralDetailView({
         `&_include:iterate=PractitionerRole:practitioner` +
         `&_revinclude=Task:focus` +
         `&_include=Task:owner` +
+        `&_include=Task:requester` +
         `&_revinclude=Provenance:target`
       );
 
@@ -577,17 +578,41 @@ export default function ReferralDetailView({
 
       // Receiving side: ServiceRequest.performer = Organization only;
       // the receiving PractitionerRole / Practitioner are in Task.owner
-      const performerRoleFromTask = task?.owner ? resolveRole(task.owner.reference || "") : null;
-      const performerPractFromTask = task?.owner ? resolvePractitioner(task.owner.reference || "") : null;
-      const performerOrgFromTask = task?.owner
+      let performerRoleFromTask = task?.owner ? resolveRole(task.owner.reference || "") : null;
+      let performerPractFromTask = task?.owner ? resolvePractitioner(task.owner.reference || "") : null;
+      let performerOrgFromTask = task?.owner
         ? resolveOrg(task.owner.reference || "")
         : resolveOrg(sr.performer?.[0]?.reference || "");
 
+      // Fallback: if _include:iterate didn't bring the receiving practitioner,
+      // explicitly fetch the Task.owner role + linked org + practitioner.
+      if (task?.owner?.reference?.includes("PractitionerRole") && !performerPractFromTask) {
+        try {
+          const roleId = refId(task.owner.reference);
+          const role = await fhirGet(`PractitionerRole/${roleId}`);
+          if (role) {
+            performerRoleFromTask = role;
+            const orgId = refId(role.organization?.reference || "");
+            const practId = refId(role.practitioner?.reference || "");
+            const [org, pract] = await Promise.all([
+              orgId ? fhirGet(`Organization/${orgId}`).catch(() => null) : Promise.resolve(null),
+              practId ? fhirGet(`Practitioner/${practId}`).catch(() => null) : Promise.resolve(null),
+            ]);
+            if (org) performerOrgFromTask = org;
+            if (pract) performerPractFromTask = pract;
+          }
+        } catch {
+          /* ignore fallback errors */
+        }
+      }
+
+      // Prefer ServiceRequest.requester; fall back to Task.requester for newly-submitted referrals
+      const reqRef = sr.requester?.reference || task?.requester?.reference || "";
       const detailData = {
         patient,
-        requesterOrg: resolveOrg(sr.requester?.reference || ""),
-        requesterRole: resolveRole(sr.requester?.reference || ""),
-        requesterPractitioner: resolvePractitioner(sr.requester?.reference || ""),
+        requesterOrg: resolveOrg(reqRef),
+        requesterRole: resolveRole(reqRef),
+        requesterPractitioner: resolvePractitioner(reqRef),
         performerOrg: performerOrgFromTask || resolveOrg(sr.performer?.[0]?.reference || ""),
         performerRole: performerRoleFromTask,
         performerPractitioner: performerPractFromTask,
@@ -731,10 +756,6 @@ export default function ReferralDetailView({
                 <dd>{specialtyText(detail.requesterRole)}</dd>
                 <dt>PRC</dt>
                 <dd>{idVal(detail.requesterPractitioner, "prc") || "—"}</dd>
-                <dt>Phone</dt>
-                <dd>{firstPhone(detail.requesterPractitioner?.telecom) || "—"}</dd>
-                <dt>Email</dt>
-                <dd>{firstEmail(detail.requesterPractitioner?.telecom) || "—"}</dd>
               </dl>
               <dl className="kv" style={{ margin: 0 }}>
                 <dt style={{ gridColumn: "1/-1", color: "var(--ink)", fontWeight: 700, marginBottom: 4 }}>
@@ -763,10 +784,6 @@ export default function ReferralDetailView({
                 <dd>{specialtyText(detail.performerRole)}</dd>
                 <dt>PRC</dt>
                 <dd>{idVal(detail.performerPractitioner, "prc") || "—"}</dd>
-                <dt>Phone</dt>
-                <dd>{firstPhone(detail.performerPractitioner?.telecom) || "—"}</dd>
-                <dt>Email</dt>
-                <dd>{firstEmail(detail.performerPractitioner?.telecom) || "—"}</dd>
               </dl>
             </div>
           </Section>

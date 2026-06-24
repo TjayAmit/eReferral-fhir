@@ -412,7 +412,8 @@ export default function SubmitPage() {
                   existingProcedureId: existingClinicalIds.procedureId,
                   existingDiagnosticReportId: existingClinicalIds.diagnosticReportId,
                 }
-              : undefined
+              : undefined,
+            baseUrl
           )
         : null,
     [input, hasRequester, user, receivingOrg, selectedReceivingRole, receivingPractitioner, draftId, draftEncounterId, existingClinicalIds]
