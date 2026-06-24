@@ -1,0 +1,21 @@
+
+> ph-ereferral-app@0.1.0 dev
+> next dev
+
+ ⚠ Port 3000 is in use, trying 3001 instead.
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3001
+  - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 1516ms
+ ○ Compiling /login ...
+ ✓ Compiled /login in 1869ms (513 modules)
+ GET /login 200 in 1985ms
+ ○ Compiling /submit ...
+ ✓ Compiled /submit in 749ms (507 modules)
+ GET /submit 200 in 856ms
+ ✓ Compiled /inbox in 121ms (513 modules)
+ GET /inbox 200 in 181ms
+ ✓ Compiled / in 301ms (520 modules)
+ GET / 200 in 450ms

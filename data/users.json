@@ -1,0 +1,22 @@
+[
+  {
+    "id": "admin-001",
+    "email": "admin",
+    "password": "@admin123",
+    "role": "admin"
+  },
+  {
+    "email": "johndoe@mailinator.com",
+    "password": "password",
+    "role": "practitioner",
+    "practitionerId": "16415",
+    "id": "user-1782217191945"
+  },
+  {
+    "email": "marydoe@mailinator.com",
+    "password": "password",
+    "role": "practitioner",
+    "practitionerId": "16570",
+    "id": "user-1782219490848"
+  }
+]
