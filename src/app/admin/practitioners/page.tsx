@@ -6,10 +6,12 @@ import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import Modal from "@/components/Modal";
 import { useAuth } from "@/lib/auth";
+import { useSettings } from "@/lib/settings-context";
 import { humanName } from "@/lib/referral";
 
 export default function PractitionersPage() {
   const { user, ready } = useAuth();
+  const { baseUrl } = useSettings();
   const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
   const [organizations, setOrganizations] = useState<any[]>([]);
@@ -57,7 +59,7 @@ export default function PractitionersPage() {
   useEffect(() => {
     if (ready && user?.role === "admin") load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, user]);
+  }, [ready, user, baseUrl]);
 
   useEffect(() => {
     setPage(1);
@@ -68,9 +70,9 @@ export default function PractitionersPage() {
     setError(null);
     try {
       const [practitionersRes, orgsRes, rolesRes] = await Promise.all([
-        fetch("/api/practitioner"),
-        fetch("/api/organization"),
-        fetch("/api/practitioner-role"),
+        fetch("/api/practitioner", { headers: { "X-FHIR-Base-Url": baseUrl } }),
+        fetch("/api/organization", { headers: { "X-FHIR-Base-Url": baseUrl } }),
+        fetch("/api/practitioner-role", { headers: { "X-FHIR-Base-Url": baseUrl } }),
       ]);
 
       const [practitionersData, orgsData, rolesData] = await Promise.all([
@@ -151,7 +153,7 @@ export default function PractitionersPage() {
 
       const response = await fetch("/api/practitioner", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl },
         body: JSON.stringify(practitioner),
       });
 
@@ -185,7 +187,7 @@ export default function PractitionersPage() {
 
         const roleResponse = await fetch("/api/practitioner-role", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl },
           body: JSON.stringify(practitionerRole),
         });
 
@@ -299,7 +301,7 @@ export default function PractitionersPage() {
 
       const response = await fetch("/api/practitioner", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl },
         body: JSON.stringify(practitioner),
       });
 
@@ -324,7 +326,7 @@ export default function PractitionersPage() {
         };
         const roleResponse = await fetch("/api/practitioner-role", {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl },
           body: JSON.stringify(updatedRole),
         });
         if (!roleResponse.ok) {
@@ -352,7 +354,7 @@ export default function PractitionersPage() {
         };
         const roleResponse = await fetch("/api/practitioner-role", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl },
           body: JSON.stringify(newRole),
         });
         if (!roleResponse.ok) {
@@ -410,6 +412,7 @@ export default function PractitionersPage() {
     try {
       const response = await fetch(`/api/practitioner?id=${id}`, {
         method: "DELETE",
+        headers: { "X-FHIR-Base-Url": baseUrl },
       });
       const data = await response.json();
       if (!response.ok) {

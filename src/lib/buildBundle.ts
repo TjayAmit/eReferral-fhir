@@ -5,12 +5,16 @@
 // meta.profile / language / generated narrative on every resource, same
 // reference wiring, same request methods/urls and codings.
 //
-// Requester side (Practitioner, initiating Organization, submission
-// PractitionerRole) is NOT typed by the user — it is taken from the logged-in
-// practitioner's session resources and emitted as conditional PUT entries.
-// Receiving side (Organization, optional PractitionerRole) comes from the form
-// selection. Per project rule: ServiceRequest.performer and Task.owner both
-// reference the receiving ORGANIZATION directly.
+// Master data (Practitioner, Organizations, PractitionerRoles) already EXISTS on
+// the server — both the requester side (from the logged-in session) and the
+// receiving side (from the form selection). The bundle references those resources
+// by their literal id and does NOT re-submit them. Only the new clinical resources
+// (Patient upsert + ServiceRequest, Encounter, Conditions, Observations, Procedure,
+// DiagnosticReport, Task, Provenance) are created — POSTed so the server assigns
+// the ids. Per project rule:
+//   • ServiceRequest.performer  → receiving ORGANIZATION only.
+//   • Task.owner                → receiving PractitionerRole (existing, references
+//     its Practitioner); falls back to the Organization when none is selected.
 
 import { SYS } from "@/lib/referral";
 
@@ -53,6 +57,8 @@ const REFERRAL_CATEGORY: Record<string, { code: string; display: string; text: s
 
 // Placeholder professional signature (valid base64), as in the IG example.
 const SIGNATURE_DATA = "dGVzdHNpZ25hdHVyZWJhc2U2NA==";
+// Minimal valid 1-page PDF (base64) for the DiagnosticReport attachment.
+const PDF_STUB = "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoK";
 
 // ---------------------------------------------------------------------------
 // Input type (form-driven clinical data only — requester is from session)
@@ -88,7 +94,7 @@ export type ClinicalInput = {
 };
 
 export const DEFAULT_INPUT: ClinicalInput = {
-  referralId: "REF-2026-001234",
+  referralId: "REF-2026-000001",
   authoredOn: "2026-06-18T08:30",
   referralCategory: "emergency",
   serviceType: { code: "71388002", display: "Procedure" },
@@ -112,7 +118,7 @@ export const DEFAULT_INPUT: ClinicalInput = {
     city: "Kalibo",
     postalCode: "5600",
     contactRelCode: "HUSB",
-    contactRelDisplay: "Husband",
+    contactRelDisplay: "husband",
     contactFamily: "Reyes",
     contactGiven: "Roberto",
   },
@@ -127,7 +133,7 @@ export const DEFAULT_INPUT: ClinicalInput = {
 };
 
 export type RequesterResources = { practitioner: any; organization: any; practitionerRole: any };
-export type ReceivingResources = { organization: any; practitionerRole?: any };
+export type ReceivingResources = { organization: any; practitionerRole?: any; practitioner?: any };
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -154,9 +160,10 @@ const esc = (s: any) =>
 function narrative(type: string, id: string | undefined, lines: string[]) {
   const header = `<p class="res-header-id"><b>Generated Narrative: ${esc(type)}${id ? " " + esc(id) : ""}</b></p>`;
   const body = lines.filter(Boolean).map((l) => `<p>${l}</p>`).join("");
+  // Resources carry language:"en", so the XHTML must declare both lang + xml:lang.
   return {
     status: "generated",
-    div: `<div xmlns="http://www.w3.org/1999/xhtml">${header}${body}</div>`,
+    div: `<div xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">${header}${body}</div>`,
   };
 }
 
@@ -166,14 +173,6 @@ const humanName = (n?: any): string => {
   if (name.text) return name.text;
   return [...(name.prefix || []), ...(name.given || []), name.family].filter(Boolean).join(" ");
 };
-
-/** Conditional-update URL `Type?identifier=system|value` from a resource's identifiers. */
-function condUrl(type: string, identifiers: any[] | undefined, preferIncludes?: string): { url: string; ident?: any } {
-  const ids = identifiers || [];
-  const ident = (preferIncludes && ids.find((i) => (i.system || "").includes(preferIncludes))) || ids[0];
-  if (!ident) return { url: type };
-  return { url: `${type}?identifier=${ident.system}|${ident.value}`, ident };
-}
 
 function putEntry(fullUrl: string, resource: any, url: string) {
   return { fullUrl, resource, request: { method: "PUT", url } };
@@ -193,13 +192,21 @@ export function buildReferralBundle(
   const authored = toFhirDateTime(i.authoredOn);
   const eff = authored;
 
-  // urn:uuid fullUrls — every cross-reference resolves to one of these.
+  // Existing master data — referenced by literal id (already on the server).
+  const submissionRoleRef = `PractitionerRole/${requester.practitionerRole.id}`;
+  const initiatingOrgRef = `Organization/${requester.organization.id}`;
+  const receivingOrgRef = `Organization/${receiving.organization.id}`;
+  const hasReceivingRole = !!receiving.practitionerRole?.id;
+  const receivingRoleRef = hasReceivingRole ? `PractitionerRole/${receiving.practitionerRole.id}` : "";
+
+  // Display labels for those references.
+  const practName = humanName(requester.practitioner?.name);
+  const initiatingOrgName = requester.organization?.name || "";
+  const receivingOrgName = receiving.organization?.name || "";
+  const receivingPractName = humanName(receiving.practitioner?.name);
+
+  // urn:uuid fullUrls for the NEW resources this referral creates.
   const patientRef = uuid();
-  const practitionerRef = uuid();
-  const initiatingOrgRef = uuid();
-  const receivingOrgRef = uuid();
-  const submissionRoleRef = uuid();
-  const receivingRoleRef = uuid();
   const srRef = uuid();
   const encounterRef = uuid();
   const chiefRef = uuid();
@@ -249,64 +256,10 @@ export function buildReferralBundle(
     : `Patient?identifier=${SYS.philhealth}|${i.patient.philhealth}`;
   entries.push(putEntry(patientRef, patient, patientPut));
 
-  // ── 2. Practitioner (requester — cloned from session) ────────────────────
-  const practitioner = structuredClone(requester.practitioner);
-  delete practitioner.text;
-  practitioner.meta = { profile: [PROFILE.practitioner] };
-  practitioner.language = "en";
-  practitioner.text = narrative("Practitioner", practitioner.id, [`Name: ${esc(humanName(practitioner.name))}`]);
-  const practPut = condUrl("Practitioner", practitioner.identifier, "prc");
-  entries.push(putEntry(practitionerRef, practitioner, practPut.url));
+  // Practitioner, Organizations and PractitionerRoles already exist on the server;
+  // they are referenced by literal id (see refs above) and are NOT re-submitted.
 
-  // ── 3. Organization (initiating — cloned from session) ───────────────────
-  const initiatingOrg = structuredClone(requester.organization);
-  delete initiatingOrg.text;
-  initiatingOrg.meta = { profile: [PROFILE.organization] };
-  initiatingOrg.language = "en";
-  initiatingOrg.text = narrative("Organization", initiatingOrg.id, [`Name: ${esc(initiatingOrg.name)}`]);
-  const initPut = condUrl("Organization", initiatingOrg.identifier, "nhfr");
-  entries.push(putEntry(initiatingOrgRef, initiatingOrg, initPut.url));
-
-  // ── 4. Organization (receiving — from selection) ─────────────────────────
-  const receivingOrg = structuredClone(receiving.organization);
-  delete receivingOrg.text;
-  receivingOrg.meta = { profile: [PROFILE.organization] };
-  receivingOrg.language = "en";
-  receivingOrg.text = narrative("Organization", receivingOrg.id, [`Name: ${esc(receivingOrg.name)}`]);
-  const recvPut = condUrl("Organization", receivingOrg.identifier, "nhfr");
-  entries.push(putEntry(receivingOrgRef, receivingOrg, recvPut.url));
-
-  // ── 5. PractitionerRole (submission — cloned from session) ───────────────
-  const submissionRole = structuredClone(requester.practitionerRole);
-  delete submissionRole.text;
-  submissionRole.meta = { profile: [PROFILE.practitionerRole] };
-  submissionRole.language = "en";
-  submissionRole.practitioner = { reference: practitionerRef };
-  submissionRole.organization = { reference: initiatingOrgRef };
-  submissionRole.text = narrative("PractitionerRole", submissionRole.id, [
-    `Practitioner: ${esc(humanName(practitioner.name))}`,
-    `Organization: ${esc(initiatingOrg.name)}`,
-  ]);
-  // Prefer the role's own identifier; else reuse the practitioner's PRC.
-  const subRolePut = condUrl("PractitionerRole", submissionRole.identifier || practitioner.identifier, "prc");
-  entries.push(putEntry(submissionRoleRef, submissionRole, subRolePut.url));
-
-  // ── 6. PractitionerRole (receiving — optional, from selection) ───────────
-  const hasReceivingRole = !!receiving.practitionerRole;
-  if (hasReceivingRole) {
-    const receivingRole = structuredClone(receiving.practitionerRole);
-    delete receivingRole.text;
-    receivingRole.meta = { profile: [PROFILE.practitionerRole] };
-    receivingRole.language = "en";
-    receivingRole.organization = { reference: receivingOrgRef };
-    receivingRole.text = narrative("PractitionerRole", receivingRole.id, [
-      `Organization: ${esc(receivingOrg.name)}`,
-    ]);
-    const recvRolePut = condUrl("PractitionerRole", receivingRole.identifier || receivingOrg.identifier, "nhfr");
-    entries.push(putEntry(receivingRoleRef, receivingRole, recvRolePut.url));
-  }
-
-  // ── 7. ServiceRequest ────────────────────────────────────────────────────
+  // ── ServiceRequest ───────────────────────────────────────────────────────
   const cat = REFERRAL_CATEGORY[i.referralCategory] || REFERRAL_CATEGORY.emergency;
   const sr: any = {
     resourceType: "ServiceRequest",
@@ -320,8 +273,8 @@ export function buildReferralBundle(
     encounter: { reference: encounterRef },
     occurrenceDateTime: authored,
     authoredOn: authored,
-    requester: { reference: submissionRoleRef },
-    performer: [{ reference: receivingOrgRef }], // receiving ORGANIZATION (project rule)
+    requester: { reference: submissionRoleRef, display: practName || undefined },
+    performer: [{ reference: receivingOrgRef, display: receivingOrgName || undefined }], // receiving ORGANIZATION
     reasonCode: [{ coding: [{ system: CS.snomed, code: i.serviceType.code, display: i.serviceType.display }], text: i.reasonText }],
     reasonReference: [{ reference: impressionRef }],
     note: i.referralNote ? [{ text: i.referralNote }] : undefined,
@@ -406,15 +359,22 @@ export function buildReferralBundle(
       subject: { reference: patientRef },
       encounter: { reference: encounterRef },
       effectiveDateTime: eff,
+      performer: [{ reference: submissionRoleRef }],
     };
     if (v.panel) {
       obs.component = v.comps.map((c: any) => ({
         code: { coding: [{ system: CS.loinc, code: c.loinc, display: c.loincDisp }, { system: CS.snomed, code: c.snomed, display: c.snomedDisp }] },
-        valueQuantity: { value: c.value, unit: c.unit, system: CS.ucum, code: c.ucum },
+        valueCodeableConcept: {
+          coding: [{ system: CS.snomed, code: c.snomed, display: c.snomedDisp }],
+          text: `${c.value} ${c.unit}`
+        },
       }));
       obs.text = narrative("Observation", undefined, [`Blood pressure: ${esc(v.comps[0].value)}/${esc(v.comps[1].value)} mmHg`]);
     } else {
-      obs.valueQuantity = { value: v.value, unit: v.unit, system: CS.ucum, code: v.ucum };
+      obs.valueCodeableConcept = {
+        coding: [{ system: CS.snomed, code: v.snomed, display: v.snomedDisp }],
+        text: `${v.value} ${v.unit}`
+      };
       obs.text = narrative("Observation", undefined, [`${esc(v.loincDisp)}: ${esc(v.value)} ${esc(v.unit)}`]);
     }
     entries.push(postEntry(uuid(), obs, "Observation"));
@@ -435,20 +395,28 @@ export function buildReferralBundle(
   entries.push(postEntry(procRef, procedure, "Procedure"));
 
   // ── 18. DiagnosticReport (no profile in the IG example) ──────────────────
+  // No `contentType` on the attachment: this server's required MimeType binding
+  // can't resolve urn:ietf:bcp:13, so any mime value errors — data alone is valid.
   const dr: any = {
     resourceType: "DiagnosticReport",
     language: "en",
     status: "final",
-    code: { coding: [{ system: CS.loinc, code: "24356-8", display: "Urinalysis complete panel - Urine" }] },
+    category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v2-0074", code: "LAB", display: "Laboratory" }] }],
+    code: {
+      coding: [{ system: CS.loinc, code: "24356-8", display: "Urinalysis complete panel - Urine" }],
+      text: i.diagnostic.title || "Urinalysis",
+    },
     subject: { reference: patientRef },
     encounter: { reference: encounterRef },
+    effectiveDateTime: eff,
+    performer: [{ reference: submissionRoleRef }],
     conclusion: i.diagnostic.conclusion || undefined,
-    presentedForm: i.diagnostic.title ? [{ title: i.diagnostic.title }] : undefined,
+    presentedForm: [{ title: i.diagnostic.title || undefined, data: PDF_STUB }],
   };
   dr.text = narrative("DiagnosticReport", undefined, [`Urinalysis · ${esc(i.diagnostic.conclusion)}`]);
   entries.push(postEntry(drRef, dr, "DiagnosticReport"));
 
-  // ── 19. Task (owner = receiving ORGANIZATION) ────────────────────────────
+  // ── 19. Task (owner = receiving PractitionerRole, else Organization) ─────
   const task: any = {
     resourceType: "Task",
     meta: { profile: [PROFILE.task] },
@@ -460,8 +428,10 @@ export function buildReferralBundle(
     for: { reference: patientRef },
     authoredOn: authored,
     lastModified: authored,
-    requester: { reference: submissionRoleRef },
-    owner: { reference: receivingOrgRef }, // receiving ORGANIZATION (project rule)
+    requester: { reference: submissionRoleRef, display: practName || undefined },
+    owner: hasReceivingRole
+      ? { reference: receivingRoleRef, display: receivingPractName || undefined }
+      : { reference: receivingOrgRef, display: receivingOrgName || undefined }, // receiving PractitionerRole, else Organization
     note: i.taskNote ? [{ text: i.taskNote }] : undefined,
   };
   task.text = narrative("Task", undefined, [`Status: requested · ${esc(i.taskCodeText)}`]);
@@ -484,11 +454,11 @@ export function buildReferralBundle(
       type: [{ system: CS.signatureType, code: "1.2.840.10065.1.12.1.5", display: "Verification Signature" }],
       when: authored,
       who: { reference: submissionRoleRef },
-      sigFormat: "application/signature+xml",
+      // No `sigFormat`: required MimeType binding is unresolvable on this server.
       data: SIGNATURE_DATA,
     }],
   };
-  provenance.text = narrative("Provenance", undefined, [`Signed by ${esc(humanName(practitioner.name))} on behalf of ${esc(initiatingOrg.name)}`]);
+  provenance.text = narrative("Provenance", undefined, [`Signed by ${esc(practName)} on behalf of ${esc(initiatingOrgName)}`]);
   entries.push(postEntry(provRef, provenance, "Provenance"));
 
   return {

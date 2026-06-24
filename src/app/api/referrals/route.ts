@@ -3,26 +3,27 @@ import { fhirGet, FhirError } from '@/lib/fhir';
 
 export async function GET(request: NextRequest) {
   try {
+    const baseUrl = request.headers.get('X-FHIR-Base-Url') || undefined;
     const searchParams = request.nextUrl.searchParams;
     const type = searchParams.get('type'); // 'all', 'outgoing', 'incoming'
     const organizationId = searchParams.get('organizationId');
     
     if (type === 'all') {
       // Admin view - fetch all tasks (referrals)
-      const result = await fhirGet('Task?_include=Task:focus&_include=Task:patient&_include=Task:requester&_sort=-authored-on&_count=100');
+      const result = await fhirGet('Task?_include=Task:focus&_include=Task:patient&_include=Task:requester&_sort=-authored-on&_count=100', baseUrl);
       return NextResponse.json(result);
     }
     
     if (type === 'outgoing' && organizationId) {
       // Outgoing referrals - tasks where requester is this organization
-      const result = await fhirGet(`Task?requester=Organization/${organizationId}&_include=Task:focus&_include=Task:patient&_sort=-authored-on&_count=100`);
+      const result = await fhirGet(`Task?requester=Organization/${organizationId}&_include=Task:focus&_include=Task:patient&_sort=-authored-on&_count=100`, baseUrl);
       return NextResponse.json(result);
     }
     
     if (type === 'incoming' && organizationId) {
       // Incoming referrals - tasks where the receiving organization is this one
       // This requires searching based on the ServiceRequest or Task owner
-      const result = await fhirGet(`Task?_include=Task:focus&_include=Task:patient&_sort=-authored-on&_count=100`);
+      const result = await fhirGet(`Task?_include=Task:focus&_include=Task:patient&_sort=-authored-on&_count=100`, baseUrl);
       
       // Filter client-side to find tasks for this organization
       // In production, this should be done server-side with proper indexing
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
     }
     
     // Default - return all if no type specified
-    const result = await fhirGet('Task?_include=Task:focus&_include=Task:patient&_sort=-authored-on&_count=100');
+    const result = await fhirGet('Task?_include=Task:focus&_include=Task:patient&_sort=-authored-on&_count=100', baseUrl);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof FhirError) {

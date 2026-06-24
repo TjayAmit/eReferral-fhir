@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "@/lib/auth";
-import { useSettings } from "@/lib/settings-context";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; adminOnly?: boolean };
 const NAV: NavItem[] = [
@@ -160,7 +159,6 @@ function getPractitionerRoleName(role: any): string {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, ready, logout } = useAuth();
-  const { server } = useSettings();
   const pathname = usePathname();
   const router = useRouter();
   const isLogin = pathname === "/login";
@@ -171,8 +169,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (ready && !user && !isLogin && !isPublicSettings) router.replace("/login");
   }, [ready, user, isLogin, isPublicSettings, router]);
 
-  // The login and settings pages render standalone (no sidebar).
-  if (isLogin || isPublicSettings) return <>{children}</>;
+  // The login page always renders standalone (no sidebar).
+  if (isLogin) return <>{children}</>;
+
+  // Settings page: standalone when unauthenticated, inside layout when authenticated.
+  if (isPublicSettings) {
+    if (!ready) return <div className="loading">Loading…</div>;
+    if (!user) return <>{children}</>;
+  }
 
   if (!ready) return <div className="loading">Loading…</div>;
   if (!user) return <div className="loading">Redirecting to sign in…</div>;
@@ -212,12 +216,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {user.role === "admin" && (
             <>
               <div className="nav-group-label">Registry</div>
-              <div className="nav-group-meta">
-                <span className="nav-group-meta-label">FHIR Server</span>
-                <span className="nav-group-meta-value" title={server.endpoint}>
-                  {server.name}
-                </span>
-              </div>
               {REGISTRY.map((n) => (
                 <Link key={n.href} href={n.href} className={pathname.startsWith(n.href) ? "active" : ""}>
                   <span className="ic" aria-hidden>{n.icon}</span>

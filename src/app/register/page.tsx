@@ -2,10 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useSettings } from "@/lib/settings-context";
 import { fhirGet, FhirError } from "@/lib/fhir";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { baseUrl } = useSettings();
   const [step, setStep] = useState<"practitioner" | "account">("practitioner");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,11 +34,11 @@ export default function RegisterPage() {
 
   useEffect(() => {
     loadOrganizations();
-  }, []);
+  }, [baseUrl]);
 
   async function loadOrganizations() {
     try {
-      const bundle = await fhirGet("Organization?_sort=name&_count=100");
+      const bundle = await fhirGet("Organization?_sort=name&_count=100", baseUrl);
       setOrganizations(
         (bundle.entry || [])
           .map((e: any) => e.resource)
@@ -86,7 +88,7 @@ export default function RegisterPage() {
       
       const response = await fetch("/api/practitioner", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl },
         body: JSON.stringify(practitioner),
       });
 
@@ -123,7 +125,7 @@ export default function RegisterPage() {
 
         const roleResponse = await fetch("/api/practitioner-role", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl },
           body: JSON.stringify(practitionerRole),
         });
 

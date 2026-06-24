@@ -4,6 +4,7 @@ import { submitTransaction, FhirError } from '@/lib/fhir';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const baseUrl = request.headers.get('X-FHIR-Base-Url') || undefined;
     
     if (!body.givenName || !body.familyName) {
       return NextResponse.json(
@@ -88,7 +89,7 @@ export async function POST(request: NextRequest) {
       ]
     };
 
-    const result = await submitTransaction(bundle);
+    const result = await submitTransaction(bundle, baseUrl);
     
     // Extract practitioner ID from response
     const practitionerEntry = result.entry?.find((e: any) => 

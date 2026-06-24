@@ -6,12 +6,14 @@ import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import Modal from "@/components/Modal";
 import { useAuth } from "@/lib/auth";
+import { useSettings } from "@/lib/settings-context";
 import { fhirGet } from "@/lib/fhir";
 
 type UserRow = { id: string; email: string; role: string; practitionerId?: string };
 
 export default function UsersPage() {
   const { user, ready } = useAuth();
+  const { baseUrl } = useSettings();
   const router = useRouter();
   const [items, setItems] = useState<UserRow[]>([]);
   const [practitioners, setPractitioners] = useState<any[]>([]);
@@ -37,7 +39,7 @@ export default function UsersPage() {
 
   useEffect(() => {
     if (ready && user?.role === "admin") { load(); loadPractitioners(); }
-  }, [ready, user]);
+  }, [ready, user, baseUrl]);
 
   useEffect(() => { setPage(1); }, [query]);
 
@@ -58,7 +60,7 @@ export default function UsersPage() {
 
   async function loadPractitioners() {
     try {
-      const bundle = await fhirGet("Practitioner?_sort=family,given&_count=100");
+      const bundle = await fhirGet("Practitioner?_sort=family,given&_count=100", baseUrl);
       setPractitioners(
         (bundle.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Practitioner")
       );

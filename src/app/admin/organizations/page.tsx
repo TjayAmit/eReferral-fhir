@@ -6,10 +6,12 @@ import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import Modal from "@/components/Modal";
 import { useAuth } from "@/lib/auth";
+import { useSettings } from "@/lib/settings-context";
 import { formatAddress } from "@/lib/referral";
 
 export default function OrganizationsPage() {
   const { user, ready } = useAuth();
+  const { baseUrl } = useSettings();
   const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,7 +53,7 @@ export default function OrganizationsPage() {
   useEffect(() => {
     if (ready && user?.role === "admin") load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, user]);
+  }, [ready, user, baseUrl]);
 
   useEffect(() => {
     setPage(1);
@@ -61,7 +63,7 @@ export default function OrganizationsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/organization");
+      const response = await fetch("/api/organization", { headers: { "X-FHIR-Base-Url": baseUrl } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to load organizations");
       setItems(
@@ -117,7 +119,7 @@ export default function OrganizationsPage() {
 
       const response = await fetch("/api/organization", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl },
         body: JSON.stringify(organization),
       });
 
@@ -203,7 +205,7 @@ export default function OrganizationsPage() {
       };
       const response = await fetch("/api/organization", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl },
         body: JSON.stringify(organization),
       });
       const data = await response.json();
@@ -224,6 +226,7 @@ export default function OrganizationsPage() {
     try {
       const response = await fetch(`/api/organization?id=${id}`, {
         method: "DELETE",
+        headers: { "X-FHIR-Base-Url": baseUrl },
       });
       const data = await response.json();
       if (!response.ok) {

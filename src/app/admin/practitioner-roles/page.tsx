@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import { useAuth } from "@/lib/auth";
+import { useSettings } from "@/lib/settings-context";
 
 export default function PractitionerRolesPage() {
   const { user, ready } = useAuth();
+  const { baseUrl } = useSettings();
   const router = useRouter();
   const [roles, setRoles] = useState<any[]>([]);
   const [practitioners, setPractitioners] = useState<any[]>([]);
@@ -25,7 +27,7 @@ export default function PractitionerRolesPage() {
 
   useEffect(() => {
     if (ready && user?.role === "admin") load();
-  }, [ready, user]);
+  }, [ready, user, baseUrl]);
 
   useEffect(() => {
     setPage(1);
@@ -36,9 +38,9 @@ export default function PractitionerRolesPage() {
     setError(null);
     try {
       const [rolesRes, practitionersRes, orgsRes] = await Promise.all([
-        fetch("/api/practitioner-role"),
-        fetch("/api/practitioner"),
-        fetch("/api/organization"),
+        fetch("/api/practitioner-role", { headers: { "X-FHIR-Base-Url": baseUrl } }),
+        fetch("/api/practitioner", { headers: { "X-FHIR-Base-Url": baseUrl } }),
+        fetch("/api/organization", { headers: { "X-FHIR-Base-Url": baseUrl } }),
       ]);
 
       const [rolesData, practitionersData, orgsData] = await Promise.all([

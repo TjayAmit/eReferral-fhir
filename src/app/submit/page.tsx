@@ -11,17 +11,26 @@ import {
 
 // ── initial form state helpers ───────────────────────────────────────────────
 
-const makeUniqueReferralId = () => {
-  const now = new Date();
-  const ts = now.getFullYear() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0") +
-    String(now.getHours()).padStart(2, "0") +
-    String(now.getMinutes()).padStart(2, "0") +
-    String(now.getSeconds()).padStart(2, "0") +
-    String(now.getMilliseconds()).padStart(3, "0");
-  return `REF-${now.getFullYear()}-${ts}`;
-};
+// Referral ID format: REF-<year>-<6-digit sequence>, e.g. REF-2026-000001.
+const formatReferralId = (year: number, seq: number) => `REF-${year}-${String(seq).padStart(6, "0")}`;
+
+// Next sequence = (highest existing REF-<year>-NNNNNN on the server) + 1.
+async function fetchNextReferralId(): Promise<string> {
+  const year = new Date().getFullYear();
+  const re = new RegExp(`^REF-${year}-(\\d{6})$`);
+  try {
+    const b = await fhirGet(`ServiceRequest?_count=500&_sort=-_lastUpdated&_elements=requisition`);
+    let max = 0;
+    for (const e of b.entry || []) {
+      const v: string | undefined = e.resource?.requisition?.value;
+      const m = v?.match(re);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return formatReferralId(year, max + 1);
+  } catch {
+    return formatReferralId(year, 1);
+  }
+}
 
 const nowLocal = () => {
   const now = new Date();
@@ -30,7 +39,7 @@ const nowLocal = () => {
 
 const makeInitialInput = (): ClinicalInput => ({
   ...structuredClone(DEFAULT_INPUT),
-  referralId: makeUniqueReferralId(),
+  referralId: formatReferralId(new Date().getFullYear(), 1),
   authoredOn: nowLocal(),
 });
 
@@ -70,6 +79,9 @@ export default function SubmitPage() {
     fhirGet("Practitioner?_sort=family%2Cgiven&_count=100").then((b) =>
       setPractitioners((b.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Practitioner"))
     ).catch(() => {});
+
+    // Assign the next running referral ID (REF-<year>-NNNNNN) from the server.
+    fetchNextReferralId().then((id) => set("referralId", id)).catch(() => {});
   }, []);
 
   // Fetch PractitionerRoles for the selected receiving organization
@@ -119,6 +131,12 @@ export default function SubmitPage() {
     [orgs, input.selectedReceivingOrgId]
   );
 
+  // Selected receiving practitioner — wired into the receiving PractitionerRole (Task.owner)
+  const receivingPractitioner = useMemo(
+    () => practitioners.find((p) => p.id === input.selectedReceivingPractitionerId) || null,
+    [practitioners, input.selectedReceivingPractitionerId]
+  );
+
   // Requester resources come straight from the logged-in user's session
   const hasRequester = !!(user?.practitioner && user?.organization && user?.practitionerRole);
   const missingConfig = !hasRequester;
@@ -129,10 +147,10 @@ export default function SubmitPage() {
         ? buildReferralBundle(
             input,
             { practitioner: user!.practitioner, organization: user!.organization, practitionerRole: user!.practitionerRole },
-            { organization: receivingOrg, practitionerRole: selectedReceivingRole || undefined }
+            { organization: receivingOrg, practitionerRole: selectedReceivingRole || undefined, practitioner: receivingPractitioner || undefined }
           )
         : null,
-    [input, hasRequester, user, receivingOrg, selectedReceivingRole]
+    [input, hasRequester, user, receivingOrg, selectedReceivingRole, receivingPractitioner]
   );
 
   async function onSubmit() {

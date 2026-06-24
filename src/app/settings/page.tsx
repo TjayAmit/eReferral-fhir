@@ -24,8 +24,8 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2000);
   }
 
-  return (
-    <div className="container">
+  const content = (
+    <>
       <AppPageHeader
         items={[{ label: "Home", href: "/" }, { label: "Settings" }]}
         title="Settings"
@@ -107,6 +107,8 @@ export default function SettingsPage() {
           </tbody>
         </table>
       </div>
-    </div>
+    </>
   );
+
+  return user ? content : <div className="container">{content}</div>;
 }

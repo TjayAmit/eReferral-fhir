@@ -17,11 +17,13 @@ export function getCurrentFhirBaseUrl(): string {
   if (typeof window !== "undefined") {
     try {
       const stored = getStoredFhirBaseUrl();
+      
       if (stored) return stored;
     } catch {
       // localStorage unavailable (e.g. private mode)
     }
   }
+
   return FHIR_BASE;
 }
 
@@ -51,8 +53,8 @@ async function parse(res: Response) {
 }
 
 /** Use Case 1 — POST the eReferral transaction Bundle to the server root. */
-export async function submitTransaction(bundle: any) {
-  const res = await fetch(getCurrentFhirBaseUrl(), {
+export async function submitTransaction(bundle: any, baseUrl?: string) {
+  const res = await fetch(baseUrl || getCurrentFhirBaseUrl(), {
     method: "POST",
     headers: { "Content-Type": FHIR_JSON, Accept: FHIR_JSON },
     body: JSON.stringify(bundle),
@@ -61,8 +63,8 @@ export async function submitTransaction(bundle: any) {
 }
 
 /** Generic search / read (path is relative to the base, e.g. "Task?status=requested"). */
-export async function fhirGet(path: string) {
-  const res = await fetch(`${getCurrentFhirBaseUrl()}/${path.replace(/^\//, "")}`, {
+export async function fhirGet(path: string, baseUrl?: string) {
+  const res = await fetch(`${baseUrl || getCurrentFhirBaseUrl()}/${path.replace(/^\//, "")}`, {
     headers: { Accept: FHIR_JSON },
     cache: "no-store",
   });
@@ -86,9 +88,10 @@ export async function fhirPatch(
   resourceType: string,
   id: string,
   ops: any[],
-  headers: Record<string, string> = { "Content-Type": "application/json-patch+json", Accept: FHIR_JSON }
+  headers: Record<string, string> = { "Content-Type": "application/json-patch+json", Accept: FHIR_JSON },
+  baseUrl?: string
 ) {
-  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}/${id}`, {
+  const res = await fetch(`${baseUrl || getCurrentFhirBaseUrl()}/${resourceType}/${id}`, {
     method: "PATCH",
     headers,
     body: JSON.stringify(ops),
@@ -102,8 +105,8 @@ export async function patchTask(taskId: string, ops: any[]) {
 }
 
 /** Create a FHIR resource (POST to resource type endpoint). */
-export async function fhirPost(resourceType: string, resource: any) {
-  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}`, {
+export async function fhirPost(resourceType: string, resource: any, baseUrl?: string) {
+  const res = await fetch(`${baseUrl || getCurrentFhirBaseUrl()}/${resourceType}`, {
     method: "POST",
     headers: { "Content-Type": FHIR_JSON, Accept: FHIR_JSON },
     body: JSON.stringify(resource),
@@ -112,8 +115,8 @@ export async function fhirPost(resourceType: string, resource: any) {
 }
 
 /** Update a FHIR resource (PUT to resource instance endpoint). */
-export async function fhirPut(resourceType: string, id: string, resource: any) {
-  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}/${id}`, {
+export async function fhirPut(resourceType: string, id: string, resource: any, baseUrl?: string) {
+  const res = await fetch(`${baseUrl || getCurrentFhirBaseUrl()}/${resourceType}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": FHIR_JSON, Accept: FHIR_JSON },
     body: JSON.stringify(resource),
@@ -122,8 +125,8 @@ export async function fhirPut(resourceType: string, id: string, resource: any) {
 }
 
 /** Delete a FHIR resource. */
-export async function fhirDelete(resourceType: string, id: string) {
-  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}/${id}`, {
+export async function fhirDelete(resourceType: string, id: string, baseUrl?: string) {
+  const res = await fetch(`${baseUrl || getCurrentFhirBaseUrl()}/${resourceType}/${id}`, {
     method: "DELETE",
     headers: { Accept: FHIR_JSON },
   });
@@ -131,8 +134,8 @@ export async function fhirDelete(resourceType: string, id: string) {
 }
 
 /** Conditional update/create FHIR resource using identifier. */
-export async function fhirConditionalPut(resourceType: string, identifierSystem: string, identifierValue: string, resource: any) {
-  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}?identifier=${identifierSystem}|${identifierValue}`, {
+export async function fhirConditionalPut(resourceType: string, identifierSystem: string, identifierValue: string, resource: any, baseUrl?: string) {
+  const res = await fetch(`${baseUrl || getCurrentFhirBaseUrl()}/${resourceType}?identifier=${identifierSystem}|${identifierValue}`, {
     method: "PUT",
     headers: { "Content-Type": FHIR_JSON, Accept: FHIR_JSON },
     body: JSON.stringify(resource),

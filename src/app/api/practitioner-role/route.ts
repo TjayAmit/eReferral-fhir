@@ -4,6 +4,7 @@ import { fhirPost, fhirGet, fhirPut, fhirDelete, fhirConditionalPut, FhirError }
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const baseUrl = request.headers.get('X-FHIR-Base-Url') || undefined;
     
     if (!body.resourceType || body.resourceType !== 'PractitionerRole') {
       return NextResponse.json(
@@ -31,13 +32,14 @@ export async function POST(request: NextRequest) {
         'PractitionerRole',
         'https://fhir.doh.gov.ph/pheref/Identifier/practitioner-role-id',
         roleIdIdentifier.value,
-        body
+        body,
+        baseUrl
       );
       return NextResponse.json(result, { status: result.id ? 200 : 201 });
     }
 
     // Regular POST if no role ID
-    const result = await fhirPost('PractitionerRole', body);
+    const result = await fhirPost('PractitionerRole', body, baseUrl);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof FhirError) {
@@ -55,6 +57,7 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    const baseUrl = request.headers.get('X-FHIR-Base-Url') || undefined;
     const searchParams = request.nextUrl.searchParams;
     const practitioner = searchParams.get('practitioner');
     const organization = searchParams.get('organization');
@@ -67,7 +70,7 @@ export async function GET(request: NextRequest) {
       query += `&organization=${organization}`;
     }
     
-    const result = await fhirGet(query);
+    const result = await fhirGet(query, baseUrl);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof FhirError) {
@@ -86,11 +89,12 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
+    const baseUrl = request.headers.get('X-FHIR-Base-Url') || undefined;
     const id = body.id;
     if (!id) {
       return NextResponse.json({ error: 'PractitionerRole ID is required for update' }, { status: 400 });
     }
-    const result = await fhirPut('PractitionerRole', id, body);
+    const result = await fhirPut('PractitionerRole', id, body, baseUrl);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof FhirError) {
@@ -105,12 +109,13 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const baseUrl = request.headers.get('X-FHIR-Base-Url') || undefined;
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get('id');
     if (!id) {
       return NextResponse.json({ error: 'PractitionerRole ID is required for deletion' }, { status: 400 });
     }
-    const result = await fhirDelete('PractitionerRole', id);
+    const result = await fhirDelete('PractitionerRole', id, baseUrl);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof FhirError) {

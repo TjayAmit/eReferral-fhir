@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import { useAuth } from "@/lib/auth";
-import { fhirGet, FhirError } from "@/lib/fhir";
+import { useSettings } from "@/lib/settings-context";
+import { FhirError } from "@/lib/fhir";
 import { humanName } from "@/lib/referral";
 
 export default function AdminReferralsPage() {
   const { user, ready } = useAuth();
+  const { baseUrl } = useSettings();
   const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -25,7 +27,7 @@ export default function AdminReferralsPage() {
   useEffect(() => {
     if (ready && user?.role === "admin") load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, user]);
+  }, [ready, user, baseUrl]);
 
   useEffect(() => {
     setPage(1);
@@ -35,7 +37,7 @@ export default function AdminReferralsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/referrals?type=all");
+      const response = await fetch("/api/referrals?type=all", { headers: { "X-FHIR-Base-Url": baseUrl } });
       const data = await response.json();
       
       if (!response.ok) {

@@ -171,12 +171,11 @@ export default function OutgoingReferralsPage() {
         }
       />
 
-      <p className="sub" style={{ marginTop: -8, marginBottom: 12 }}>
-        Referrals requested by your practitioner role
-        (<code>Task.requester = PractitionerRole/{practitionerRoleId}</code>).
-      </p>
-
-      <div style={{ marginBottom: 14 }}>
+      <div className="filter-bar">
+        <span className="filter-bar-caption">
+          Referrals requested by your practitioner role
+          (<code>Task.requester = PractitionerRole/{practitionerRoleId}</code>).
+        </span>
         <StatusFilter value={statusFilter} counts={statusCounts} onChange={setStatusFilter} />
       </div>
 
