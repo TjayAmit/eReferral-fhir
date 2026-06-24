@@ -1,9 +1,29 @@
 // Thin FHIR REST client. The open FHIRLab sandbox needs no auth and allows CORS,
 // so calls go straight from the browser to the server — no backend/proxy/DB.
 
+import { getStoredFhirBaseUrl } from "./settings";
+
 export const FHIR_BASE =
   process.env.NEXT_PUBLIC_FHIR_BASE_URL?.replace(/\/$/, "") ||
   "https://cdr.pheref.fhirlab.net/fhir";
+
+export const TX_BASE =
+  process.env.NEXT_PUBLIC_TX_BASE_URL?.replace(/\/$/, "") ||
+  "https://tx.fhirlab.net/fhir";
+
+/** Returns the currently selected FHIR base URL. In the browser this reads the
+ * user's setting from localStorage; on the server it falls back to FHIR_BASE. */
+export function getCurrentFhirBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = getStoredFhirBaseUrl();
+      if (stored) return stored;
+    } catch {
+      // localStorage unavailable (e.g. private mode)
+    }
+  }
+  return FHIR_BASE;
+}
 
 const FHIR_JSON = "application/fhir+json";
 
@@ -32,7 +52,7 @@ async function parse(res: Response) {
 
 /** Use Case 1 — POST the eReferral transaction Bundle to the server root. */
 export async function submitTransaction(bundle: any) {
-  const res = await fetch(FHIR_BASE, {
+  const res = await fetch(getCurrentFhirBaseUrl(), {
     method: "POST",
     headers: { "Content-Type": FHIR_JSON, Accept: FHIR_JSON },
     body: JSON.stringify(bundle),
@@ -42,7 +62,7 @@ export async function submitTransaction(bundle: any) {
 
 /** Generic search / read (path is relative to the base, e.g. "Task?status=requested"). */
 export async function fhirGet(path: string) {
-  const res = await fetch(`${FHIR_BASE}/${path.replace(/^\//, "")}`, {
+  const res = await fetch(`${getCurrentFhirBaseUrl()}/${path.replace(/^\//, "")}`, {
     headers: { Accept: FHIR_JSON },
     cache: "no-store",
   });
@@ -68,7 +88,7 @@ export async function fhirPatch(
   ops: any[],
   headers: Record<string, string> = { "Content-Type": "application/json-patch+json", Accept: FHIR_JSON }
 ) {
-  const res = await fetch(`${FHIR_BASE}/${resourceType}/${id}`, {
+  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}/${id}`, {
     method: "PATCH",
     headers,
     body: JSON.stringify(ops),
@@ -83,7 +103,7 @@ export async function patchTask(taskId: string, ops: any[]) {
 
 /** Create a FHIR resource (POST to resource type endpoint). */
 export async function fhirPost(resourceType: string, resource: any) {
-  const res = await fetch(`${FHIR_BASE}/${resourceType}`, {
+  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}`, {
     method: "POST",
     headers: { "Content-Type": FHIR_JSON, Accept: FHIR_JSON },
     body: JSON.stringify(resource),
@@ -93,7 +113,7 @@ export async function fhirPost(resourceType: string, resource: any) {
 
 /** Update a FHIR resource (PUT to resource instance endpoint). */
 export async function fhirPut(resourceType: string, id: string, resource: any) {
-  const res = await fetch(`${FHIR_BASE}/${resourceType}/${id}`, {
+  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": FHIR_JSON, Accept: FHIR_JSON },
     body: JSON.stringify(resource),
@@ -103,7 +123,7 @@ export async function fhirPut(resourceType: string, id: string, resource: any) {
 
 /** Delete a FHIR resource. */
 export async function fhirDelete(resourceType: string, id: string) {
-  const res = await fetch(`${FHIR_BASE}/${resourceType}/${id}`, {
+  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}/${id}`, {
     method: "DELETE",
     headers: { Accept: FHIR_JSON },
   });
@@ -112,10 +132,18 @@ export async function fhirDelete(resourceType: string, id: string) {
 
 /** Conditional update/create FHIR resource using identifier. */
 export async function fhirConditionalPut(resourceType: string, identifierSystem: string, identifierValue: string, resource: any) {
-  const res = await fetch(`${FHIR_BASE}/${resourceType}?identifier=${identifierSystem}|${identifierValue}`, {
+  const res = await fetch(`${getCurrentFhirBaseUrl()}/${resourceType}?identifier=${identifierSystem}|${identifierValue}`, {
     method: "PUT",
     headers: { "Content-Type": FHIR_JSON, Accept: FHIR_JSON },
     body: JSON.stringify(resource),
+  });
+  return parse(res);
+}
+
+/** Expand a ValueSet to get all contained concepts via the terminology server. */
+export async function expandValueSet(url: string) {
+  const res = await fetch(`${TX_BASE}/ValueSet/$expand?url=${encodeURIComponent(url)}`, {
+    headers: { Accept: FHIR_JSON },
   });
   return parse(res);
 }

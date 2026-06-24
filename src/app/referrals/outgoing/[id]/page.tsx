@@ -3,11 +3,10 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import Breadcrumb from "@/components/Breadcrumb";
-import PageHeader from "@/components/PageHeader";
+import AppPageHeader from "@/components/AppPageHeader";
 import { useAuth } from "@/lib/auth";
-import { fhirGet, FhirError } from "@/lib/fhir";
-import { humanName } from "@/lib/referral";
+import { fhirGet, FhirError, patchTask } from "@/lib/fhir";
+import { ACTION_POINTS, actionPatch, humanName } from "@/lib/referral";
 
 export default function ReferralDetailPage() {
   const { user, ready } = useAuth();
@@ -31,6 +30,8 @@ export default function ReferralDetailPage() {
   const [requesterPractitioner, setRequesterPractitioner] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (ready && !user) router.replace("/login");
@@ -145,6 +146,25 @@ export default function ReferralDetailPage() {
     }
   }
 
+  async function applyAction(s: string, needsNote?: boolean) {
+    if (!task) return;
+    let reason: string | undefined;
+    if (needsNote) {
+      reason = window.prompt("Reason for rejection?") || undefined;
+      if (reason === undefined) return;
+    }
+    setBusy(s); setNotice(null); setError(null);
+    try {
+      const updated = await patchTask(task.id, actionPatch(s, reason));
+      setNotice(`Action point updated → ${s}`);
+      setTask(updated);
+      // Refresh the full detail view to reflect the new status
+      load();
+    } catch (e) {
+      setError(e instanceof FhirError ? e.message : String(e));
+    } finally { setBusy(null); }
+  }
+
   if (!ready) return <div className="loading">Loading…</div>;
   if (!user) return null;
 
@@ -156,13 +176,12 @@ export default function ReferralDetailPage() {
 
   return (
     <>
-      <Breadcrumb items={[
-        { label: "Home", href: "/" },
-        { label: "Requested Referrals", href: "/referrals/outgoing" },
-        { label: refId }
-      ]} />
-
-      <PageHeader
+      <AppPageHeader
+        items={[
+          { label: "Home", href: "/" },
+          { label: "Requested Referrals", href: "/referrals/outgoing" },
+          { label: refId },
+        ]}
         title={`Referral: ${refId}`}
         actions={
           <>
@@ -197,6 +216,27 @@ export default function ReferralDetailPage() {
               <span>{task.lastModified ? new Date(task.lastModified).toLocaleString() : "—"}</span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Action points */}
+      {task && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3>Action points</h3>
+          <div className="row">
+            {ACTION_POINTS.map((a) => (
+              <button
+                key={a.status}
+                className={a.status === "rejected" ? "ghost" : ""}
+                onClick={() => applyAction(a.status, a.note)}
+                disabled={!!busy}
+              >
+                {busy === a.status ? "…" : a.label}
+              </button>
+            ))}
+          </div>
+          {notice && <div className="alert ok">✅ {notice}</div>}
+          {error && <div className="alert err">❌ {error}</div>}
         </div>
       )}
 

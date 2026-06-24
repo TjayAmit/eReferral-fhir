@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Breadcrumb from "@/components/Breadcrumb";
-import PageHeader from "@/components/PageHeader";
+import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import Modal from "@/components/Modal";
 import { useAuth } from "@/lib/auth";
@@ -156,9 +155,8 @@ export default function UsersPage() {
 
   return (
     <>
-      <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Admin", href: "/admin" }, { label: "Users" }]} />
-
-      <PageHeader
+      <AppPageHeader
+        items={[{ label: "Home", href: "/" }, { label: "Admin", href: "/admin" }, { label: "Users" }]}
         title="Users"
         actions={
           <>

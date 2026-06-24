@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import type { Role } from "@/lib/db";
-import { FHIR_BASE } from "@/lib/fhir";
+import { getCurrentFhirBaseUrl } from "@/lib/fhir";
 
 const FHIR_JSON = "application/fhir+json";
 
@@ -30,7 +30,7 @@ const STORAGE_KEY = "eref_user";
 async function fhirFetch(path: string): Promise<any> {
   const url = path.startsWith("http")
     ? path
-    : `${FHIR_BASE}/${path.replace(/^\//, "")}`;
+    : `${getCurrentFhirBaseUrl()}/${path.replace(/^\//, "")}`;
   const res = await fetch(url, {
     headers: { Accept: FHIR_JSON },
     cache: "no-store",

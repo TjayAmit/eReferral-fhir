@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import Breadcrumb from "@/components/Breadcrumb";
-import PageHeader from "@/components/PageHeader";
+import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import { useAuth } from "@/lib/auth";
 import { fhirGet, FhirError } from "@/lib/fhir";
@@ -123,7 +122,7 @@ export default function OutgoingReferralsPage() {
   if (!practitionerRoleId) {
     return (
       <>
-        <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Requested Referrals" }]} />
+        <AppPageHeader items={[{ label: "Home", href: "/" }, { label: "Requested Referrals" }]} title="Requested Referrals" />
         <div className="alert err">No practitioner role linked to your account — contact an admin.</div>
       </>
     );
@@ -153,9 +152,8 @@ export default function OutgoingReferralsPage() {
 
   return (
     <>
-      <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Requested Referrals" }]} />
-
-      <PageHeader
+      <AppPageHeader
+        items={[{ label: "Home", href: "/" }, { label: "Requested Referrals" }]}
         title="Requested Referrals"
         actions={
           <>

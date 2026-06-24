@@ -95,6 +95,10 @@ export default function LoginPage() {
         <p className="muted">
           New practitioner? <a href="/register">Register here</a>
         </p>
+
+        <p className="muted">
+          <a href="/settings">Configure FHIR server</a>
+        </p>
       </form>
     </div>
   );

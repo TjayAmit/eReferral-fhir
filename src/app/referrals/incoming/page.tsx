@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Breadcrumb from "@/components/Breadcrumb";
-import PageHeader from "@/components/PageHeader";
+import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import { useAuth } from "@/lib/auth";
 import { fhirGet, patchTask, FhirError } from "@/lib/fhir";
@@ -488,7 +487,7 @@ export default function IncomingReferralsPage() {
   if (!orgId) {
     return (
       <>
-        <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Incoming Referrals" }]} />
+        <AppPageHeader items={[{ label: "Home", href: "/" }, { label: "Incoming Referrals" }]} title="Incoming Referrals" />
         <div className="alert err">No organization linked to your account — contact an admin.</div>
       </>
     );
@@ -519,11 +518,14 @@ export default function IncomingReferralsPage() {
   if (selected) {
     return (
       <>
-        <Breadcrumb items={[
-          { label: "Home", href: "/" },
-          { label: "Incoming Referrals", href: "/referrals/incoming" },
-          { label: selected.sr?.identifier?.[0]?.value || selected.sr?.id },
-        ]} />
+        <AppPageHeader
+          items={[
+            { label: "Home", href: "/" },
+            { label: "Incoming Referrals", href: "/referrals/incoming" },
+            { label: selected.sr?.identifier?.[0]?.value || selected.sr?.id },
+          ]}
+          title={`Referral: ${selected.sr?.identifier?.[0]?.value || selected.sr?.id || "Detail"}`}
+        />
         <ReferralDetail
           sr={selected.sr}
           task={selected.task}
@@ -538,9 +540,8 @@ export default function IncomingReferralsPage() {
 
   return (
     <>
-      <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Incoming Referrals" }]} />
-
-      <PageHeader
+      <AppPageHeader
+        items={[{ label: "Home", href: "/" }, { label: "Incoming Referrals" }]}
         title="Incoming Referrals"
         actions={
           <>

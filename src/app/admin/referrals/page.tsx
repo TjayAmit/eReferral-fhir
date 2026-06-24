@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Breadcrumb from "@/components/Breadcrumb";
-import PageHeader from "@/components/PageHeader";
+import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import { useAuth } from "@/lib/auth";
 import { fhirGet, FhirError } from "@/lib/fhir";
@@ -95,13 +94,12 @@ export default function AdminReferralsPage() {
 
   return (
     <>
-      <Breadcrumb items={[
-        { label: "Home", href: "/" },
-        { label: "Admin", href: "/admin" },
-        { label: "Referrals" },
-      ]} />
-
-      <PageHeader
+      <AppPageHeader
+        items={[
+          { label: "Home", href: "/" },
+          { label: "Admin", href: "/admin" },
+          { label: "Referrals" },
+        ]}
         title="All Referrals"
         actions={
           <>

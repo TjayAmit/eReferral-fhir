@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PH Core Encounter Records — Rate Report | PH Core IG</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#ffffff; --panel-2:#f8fafc; --ink:#0f172a; --muted:#64748b;
+    --line:#e2e8f0; --brand:#4338ca; --brand-2:#6366f1; --accent:#0891b2;
+    --active:#d97706; --recurrence:#db2777; --relapse:#c026d3; --inactive:#2563eb;
+    --remission:#0d9488; --resolved:#16a34a; --unknown:#94a3b8;
+    --confirmed:#16a34a; --provisional:#d97706; --severe:#dc2626;
+    --shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;
+    color:var(--ink);background:linear-gradient(180deg,#f1f5f9,#e2e8f0 240px,#eef2f6);
+    min-height:100vh;display:flex;flex-direction:column}
+  header.top{background:linear-gradient(110deg,#4338ca,#3730a3);color:#fff;padding:18px 28px;
+    display:flex;align-items:center;gap:16px;box-shadow:var(--shadow)}
+  header.top .mark{width:42px;height:42px;border-radius:11px;background:rgba(255,255,255,.16);
+    display:grid;place-items:center;font-size:22px}
+  header.top h1{font-size:19px;margin:0;font-weight:650;letter-spacing:.2px}
+  header.top p{margin:2px 0 0;font-size:12.5px;opacity:.82}
+  header.top .spacer{flex:1}
+  header.top .env{font-size:11.5px;background:rgba(255,255,255,.14);padding:6px 11px;border-radius:999px}
+
+  .wrap{margin:0;padding:22px 5rem 60px;flex:1 0 auto;
+    display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start}
+  .main{grid-column:1;grid-row:1;min-width:0;display:flex;flex-direction:column;gap:18px}
+  .main > .kpis{margin:0}
+  .wrap > .controls{grid-column:2;grid-row:1;position:sticky;top:18px;align-self:start;margin:0}
+  @media(max-width:880px){ .wrap{display:block;padding:22px 20px 60px} .wrap > .controls{position:static;margin-bottom:18px} }
+
+  .controls{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:14px 16px;box-shadow:var(--shadow);display:grid;
+    grid-template-columns:1fr;gap:12px 14px;align-items:end}
+  .controls .full{grid-column:1/-1}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .field input,.field select{width:100%;min-width:0;padding:9px 10px;border:1px solid var(--line);border-radius:9px;
+    font-size:13px;background:var(--panel-2);color:var(--ink)}
+  .field input:focus,.field select:focus{outline:2px solid var(--brand-2);outline-offset:0;background-color:#fff}
+  .field select{-webkit-appearance:none;-moz-appearance:none;appearance:none;
+    background-color:var(--panel-2);
+    background-image:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%2364748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>');
+    background-repeat:no-repeat;background-position:right 10px center;padding-right:32px}
+  .btnrow{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  button.go{background:var(--brand);color:#fff;border:0;padding:10px 18px;border-radius:9px;
+    font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:var(--shadow)}
+  button.go:hover{background:#3730a3}
+  button.ghost{background:#fff;border:1px solid var(--line);color:var(--ink);padding:10px 14px;
+    border-radius:9px;font-size:13px;cursor:pointer}
+  .auto{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)}
+  .stamp{font-size:12px;color:var(--muted);margin-left:auto}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin:18px 0}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .kpi .v{font-size:30px;font-weight:720;line-height:1}
+  .kpi .l{font-size:12px;color:var(--muted);margin-top:7px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  .kpi .bar{position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--brand)}
+  .kpi.k-active .bar{background:var(--active)}
+  .kpi.k-severe .bar{background:var(--severe)}
+  .kpi.k-conf .bar{background:var(--confirmed)}
+  .kpi.k-rate .bar{background:var(--accent)}
+
+  .grid2{display:grid;grid-template-columns:1.15fr 1fr;gap:16px;align-items:start}
+  @media(max-width:880px){.grid2{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+  .card h2{font-size:14px;margin:0;padding:14px 16px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:8px;background:var(--panel-2)}
+  .card h2 .count{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600}
+  .card .body{padding:14px 16px}
+
+  /* bars */
+  .statusbars{display:flex;flex-direction:column;gap:11px}
+  .sb{display:grid;grid-template-columns:128px 1fr 34px;align-items:center;gap:10px}
+  .sb .name{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .track{height:10px;background:#eef2f6;border-radius:999px;overflow:hidden}
+  .fill{height:100%;border-radius:999px;transition:width .5s ease}
+  .sb .num{font-size:13px;font-weight:700;text-align:right}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);
+    padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel-2);position:sticky;top:0}
+  tbody td{padding:11px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+  tbody tr:hover{background:#f8fafc}
+  .tablewrap{max-height:560px;overflow:auto}
+  .pname{font-weight:650}
+  .sub{font-size:11.5px;color:var(--muted)}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;
+    font-size:11.5px;font-weight:650;white-space:nowrap}
+  .pill .dot{width:7px;height:7px}
+  .sev{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+  .sev.severe{color:var(--severe)}
+  .sev.moderate{color:var(--active)}
+  .sev.mild{color:var(--muted)}
+
+  .empty,.loading,.error{padding:34px 16px;text-align:center;color:var(--muted);font-size:13.5px}
+  .error{color:var(--severe)}
+  .spinner{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--brand);
+    border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .legend{font-size:11px;color:var(--muted);padding:10px 16px;border-top:1px solid var(--line);background:var(--panel-2)}
+  code{background:#eef2f6;padding:1px 6px;border-radius:5px;font-size:12px}
+
+  /* clickable rows + record modal */
+  tr.rowlink{cursor:pointer}
+  .modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;
+    justify-content:center;padding:40px 16px;z-index:50;overflow:auto}
+  .modal.open{display:flex}
+  .sheet{background:var(--panel);border-radius:16px;box-shadow:0 20px 60px rgba(15,23,42,.3);
+    width:100%;max-width:760px;overflow:hidden}
+  .sheet > header{background:linear-gradient(110deg,#4338ca,#3730a3);color:#fff;padding:16px 20px;
+    display:flex;align-items:center;gap:10px;position:sticky;top:0}
+  .sheet > header h3{margin:0;font-size:16px;font-weight:680}
+  .sheet > header .sub{font-size:12px;opacity:.85;margin-top:2px}
+  .sheet .x{margin-left:auto;background:rgba(255,255,255,.16);border:0;border-radius:8px;width:32px;height:32px;
+    font-size:18px;cursor:pointer;color:#fff;line-height:1}
+  .sheet .x:hover{background:rgba(255,255,255,.28)}
+  .sheet .content{padding:8px 20px 22px;max-height:72vh;overflow:auto}
+  .recsec{margin-top:16px}
+  .recsec .sectitle{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);
+    font-weight:700;margin:0 0 8px;display:flex;align-items:center;gap:7px}
+  .recsec .sectitle .badge{background:#eef2f6;color:var(--muted);border-radius:999px;padding:1px 8px;font-size:11px}
+  .rescard{border:1px solid var(--line);border-radius:11px;padding:11px 13px;margin-bottom:9px;background:var(--panel-2)}
+  .rescard .rt{font-weight:650;font-size:13.5px}
+  .rescard .rmeta{font-size:12px;color:var(--muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:3px 14px}
+  .rescard details{margin-top:8px}
+  .rescard summary{font-size:11.5px;color:var(--brand);cursor:pointer;font-weight:600}
+  .rescard pre{background:#0f172a;color:#e2e8f0;border-radius:9px;padding:11px;overflow:auto;
+    font-size:11.5px;margin:8px 0 0;max-height:280px}
+  footer{max-width:1200px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:11.5px;text-align:center}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="mark">🫀</div>
+  <div>
+    <h1>PH Core Encounter Records — Rate Report</h1>
+    <p>PH Core IG v0.2.0 · Track 2 · rate report by Referral Category &amp; Reason for Referral · read-only view</p>
+  </div>
+  <div class="spacer"></div>
+  <div class="env" id="envChip">FHIR R4 · live</div>
+</header>
+
+<div class="wrap">
+
+  <!-- ===== Filters ===== -->
+  <section class="controls">
+    <div class="field">
+      <label for="baseUrl">FHIR Base URL</label>
+      <input id="baseUrl" value="https://hapi.fhir.org/baseR4" />
+    </div>
+    <div class="field">
+      <label for="reason">Reason for Referral (SNOMED · Condition.code)</label>
+      <select id="reason">
+        <option value="">All reasons</option>
+        <option value="401303003" selected>401303003 — Acute STEMI</option>
+        <option value="401314000">401314000 — Acute NSTEMI</option>
+        <option value="22298006">22298006 — Myocardial infarction</option>
+        <option value="194828000">194828000 — Angina</option>
+        <option value="398254007">398254007 — Pre-eclampsia</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="category">Referral Category (Condition.category)</label>
+      <select id="category">
+        <option value="">All categories</option>
+        <option value="encounter-diagnosis" selected>encounter-diagnosis</option>
+        <option value="problem-list-item">problem-list-item</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="facility">Facility (NHFR code)</label>
+      <input id="facility" placeholder="e.g. 12345678" />
+    </div>
+    <div class="field">
+      <label for="dateFrom">Recorded from</label>
+      <input id="dateFrom" type="date" />
+    </div>
+    <div class="field">
+      <label for="dateTo">Recorded to</label>
+      <input id="dateTo" type="date" />
+    </div>
+    <div class="field btnrow full">
+      <button class="go" id="refreshBtn">⟳ Refresh data</button>
+      <button class="ghost" id="resetBtn">Reset filters</button>
+      <label class="auto"><input type="checkbox" id="autoRefresh" /> Auto-refresh (30s)</label>
+      <span class="stamp" id="stamp">—</span>
+    </div>
+  </section>
+
+  <main class="main">
+  <!-- ===== KPI cards ===== -->
+  <section class="kpis" id="kpis">
+    <div class="kpi"><div class="bar"></div><div class="v" id="kTotal">—</div><div class="l">Total cases</div></div>
+    <div class="kpi k-active"><div class="bar"></div><div class="v" id="kActive">—</div><div class="l">Active</div></div>
+    <div class="kpi k-severe"><div class="bar"></div><div class="v" id="kSevere">—</div><div class="l">Severe</div></div>
+    <div class="kpi k-conf"><div class="bar"></div><div class="v" id="kConfirmed">—</div><div class="l">Confirmed</div></div>
+    <div class="kpi k-rate"><div class="bar"></div><div class="v" id="kRate">—</div><div class="l">Confirmation rate</div></div>
+  </section>
+
+  <div class="grid2">
+    <!-- ===== Encounter record list ===== -->
+    <section class="card">
+      <h2>📋 Encounter records <span class="count" id="rowCount"></span></h2>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Patient</th><th>Reason (diagnosis)</th><th>Category</th><th>Severity</th><th>Recorded</th><th>Status</th></tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td colspan="6"><div class="loading"><div class="spinner"></div>Loading records…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="legend">One row per <code>Condition</code> (the encounter diagnosis). <strong>Click any row</strong> to view the full referral details. Patient and Encounter are pulled via <code>_include</code>.</div>
+    </section>
+
+    <!-- ===== Cases by reason ===== -->
+    <section class="card">
+      <h2>📊 Cases by reason</h2>
+      <div class="body">
+        <div class="statusbars" id="reasonBars">
+          <div class="loading"><div class="spinner"></div>Loading…</div>
+        </div>
+      </div>
+      <div class="legend">Rate of cases grouped by <code>Condition.code</code> across the current filter.</div>
+    </section>
+  </div>
+  </main>
+</div>
+
+<!-- ===== Full referral details modal ===== -->
+<div class="modal" id="recModal" role="dialog" aria-modal="true" aria-labelledby="recTitle">
+  <div class="sheet">
+    <header>
+      <div>
+        <h3 id="recTitle">Full referral details</h3>
+        <div class="sub" id="recSub">—</div>
+      </div>
+      <button class="x" id="recClose" aria-label="Close">×</button>
+    </header>
+    <div class="content" id="recContent"></div>
+  </div>
+</div>
+
+<footer>
+  PH Core IG · FHIR R4 · Folder 4 (Rate Report) — generated live from
+  <span id="srcUrl">the FHIR server</span>. Read-only reporting view over <code>Condition</code> records.
+</footer>
+
+<script>
+// Condition.clinicalStatus value set
+const STATUSES = [
+  {key:'active',     label:'Active',     color:'var(--active)'},
+  {key:'recurrence', label:'Recurrence', color:'var(--recurrence)'},
+  {key:'relapse',    label:'Relapse',    color:'var(--relapse)'},
+  {key:'inactive',   label:'Inactive',   color:'var(--inactive)'},
+  {key:'remission',  label:'Remission',  color:'var(--remission)'},
+  {key:'resolved',   label:'Resolved',   color:'var(--resolved)'},
+];
+const COLOR = Object.fromEntries(STATUSES.map(s=>[s.key,s.color]));
+const REASON_COLORS = ['#4338ca','#0891b2','#db2777','#d97706','#16a34a','#7c3aed','#0d9488','#dc2626','#2563eb','#94a3b8'];
+const SNOMED = 'http://snomed.info/sct';
+const $ = id => document.getElementById(id);
+let timer = null;
+
+function buildUrl(){
+  const base = $('baseUrl').value.replace(/\/+$/,'');
+  const p = new URLSearchParams();
+  p.append('_include','Condition:subject');
+  p.append('_include','Condition:encounter');
+  p.append('_count','100');
+  p.append('_sort','-recorded-date');
+  const reason = $('reason').value, cat = $('category').value,
+        df = $('dateFrom').value, dt = $('dateTo').value;
+  // For Condition, BOTH `category` and `code` are valid R4 search params — filter server-side.
+  // (Unlike ServiceRequest, where `reason-code` is invalid and must be filtered client-side.)
+  if(cat)    p.append('category', cat);
+  if(reason) p.append('code', SNOMED + '|' + reason);
+  if(df)     p.append('recorded-date','ge'+df);
+  if(dt)     p.append('recorded-date','le'+dt);
+  return base + '/Condition?' + p.toString();
+}
+
+function patientName(p){
+  if(!p) return 'Unknown patient';
+  const n = (p.name||[])[0];
+  if(!n) return 'Unnamed · ' + (p.id||'');
+  return [(n.given||[]).join(' '), n.family].filter(Boolean).join(' ') || n.text || 'Unnamed';
+}
+function patientId(p){
+  const ids = (p&&p.identifier)||[];
+  const ph = ids.find(i=>(i.system||'').includes('philhealth'));
+  return ph ? 'PhilHealth ' + ph.value : (ids[0] ? ids[0].value : (p?p.id:''));
+}
+function ccText(cc){
+  if(!cc) return '—';
+  return cc.text || (cc.coding&&cc.coding[0]&&(cc.coding[0].display||cc.coding[0].code)) || '—';
+}
+function reasonKey(cond){
+  const c = (cond.code&&cond.code.coding||[]).find(x=>(x.system||'').includes('snomed')) || (cond.code&&cond.code.coding||[])[0];
+  return c ? (c.display||c.code) : (cond.code&&cond.code.text || 'Unspecified');
+}
+function clinStatus(cond){
+  const c = (cond.clinicalStatus&&cond.clinicalStatus.coding||[])[0];
+  return c ? c.code : '';
+}
+function verStatus(cond){
+  const c = (cond.verificationStatus&&cond.verificationStatus.coding||[])[0];
+  return c ? c.code : '';
+}
+function severityBand(cond){
+  const code = ((cond.severity&&cond.severity.coding||[])[0]||{}).code;
+  if(code==='24484000') return 'severe';
+  if(code==='6736007')  return 'moderate';
+  if(code==='255604002')return 'mild';
+  return '';
+}
+function facilityCode(enc){
+  const sp = enc && enc.serviceProvider && enc.serviceProvider.identifier;
+  return sp ? sp.value : '';
+}
+function fmtDate(d){
+  if(!d) return '—';
+  const dt = new Date(d);
+  return isNaN(dt) ? d : dt.toLocaleString('en-PH',{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function statusPill(s){
+  const c = COLOR[s] || 'var(--unknown)';
+  const label = s ? s : 'unknown';
+  return `<span class="pill" style="background:${c}1a;color:${c}">
+            <span class="dot" style="background:${c}"></span>${label}</span>`;
+}
+
+async function load(){
+  const url = buildUrl();
+  $('srcUrl').textContent = url;
+  $('rows').innerHTML = `<tr><td colspan="6"><div class="loading"><div class="spinner"></div>Querying FHIR server…</div></td></tr>`;
+  $('reasonBars').innerHTML = `<div class="loading"><div class="spinner"></div>Loading…</div>`;
+  try{
+    const res = await fetch(url, {headers:{'Accept':'application/fhir+json'}});
+    if(!res.ok) throw new Error('HTTP '+res.status+' '+res.statusText);
+    const bundle = await res.json();
+    render(bundle);
+    $('stamp').textContent = 'Updated ' + new Date().toLocaleTimeString('en-PH');
+  }catch(err){
+    const msg = /Failed to fetch/.test(err.message)
+      ? 'Could not reach the FHIR server (network or CORS). Check the Base URL and that the server allows browser requests.'
+      : err.message;
+    $('rows').innerHTML = `<tr><td colspan="6"><div class="error">⚠ ${msg}</div></td></tr>`;
+    $('reasonBars').innerHTML = `<div class="error">⚠ ${msg}</div>`;
+  }
+}
+
+function render(bundle){
+  const entries = (bundle.entry||[]).map(e=>e.resource).filter(Boolean);
+  let conds = entries.filter(r=>r.resourceType==='Condition');
+  const pats = {}; entries.filter(r=>r.resourceType==='Patient').forEach(p=>pats[p.id]=p);
+  const encs = {}; entries.filter(r=>r.resourceType==='Encounter').forEach(e=>encs[e.id]=e);
+
+  // facility filter is client-side: Condition has no facility search param, so match on the
+  // included Encounter.serviceProvider (NHFR identifier).
+  const fac = $('facility').value.trim();
+  if(fac){
+    conds = conds.filter(c=>{
+      const encId = c.encounter && c.encounter.reference ? c.encounter.reference.split('/').pop() : null;
+      return encId && facilityCode(encs[encId]) === fac;
+    });
+  }
+
+  // ---- table rows ----
+  if(!conds.length){
+    $('rows').innerHTML = `<tr><td colspan="6"><div class="empty">No encounter records match the current filter.</div></td></tr>`;
+  }else{
+    $('rows').innerHTML = conds.map(c=>{
+      const pid = c.subject && c.subject.reference ? c.subject.reference.split('/').pop() : null;
+      const pat = pid ? pats[pid] : null;
+      const sev = severityBand(c);
+      const ver = verStatus(c);
+      const encId = c.encounter && c.encounter.reference ? c.encounter.reference.split('/').pop() : '';
+      return `<tr class="rowlink" data-pid="${pid||''}" data-enc="${encId}" title="View full referral details">
+        <td><div class="pname">${patientName(pat)}</div><div class="sub">${patientId(pat)}</div></td>
+        <td>${ccText(c.code)}${ver?`<div class="sub">${ver}</div>`:''}</td>
+        <td>${ccText(c.category&&c.category[0])}</td>
+        <td>${sev?`<span class="sev ${sev}">${sev}</span>`:'—'}</td>
+        <td>${fmtDate(c.recordedDate||c.onsetDateTime)}</td>
+        <td>${statusPill(clinStatus(c))}</td>
+      </tr>`;
+    }).join('');
+  }
+  $('rowCount').textContent = conds.length + (bundle.total!=null ? ' of '+bundle.total : '') + ' shown';
+
+  // ---- cases by reason (dynamic) ----
+  const reasonCounts = {};
+  conds.forEach(c=>{ const k = reasonKey(c); reasonCounts[k] = (reasonCounts[k]||0)+1; });
+  const reasonRows = Object.entries(reasonCounts).sort((a,b)=>b[1]-a[1]);
+  const rmax = Math.max(1, ...reasonRows.map(r=>r[1]));
+  if(!reasonRows.length){
+    $('reasonBars').innerHTML = `<div class="empty">No data.</div>`;
+  }else{
+    $('reasonBars').innerHTML = reasonRows.map(([name,n],i)=>{
+      const color = REASON_COLORS[i % REASON_COLORS.length];
+      const pct = Math.round((n/rmax)*100);
+      return `<div class="sb">
+        <div class="name"><span class="dot" style="background:${color}"></span>${name}</div>
+        <div class="track"><div class="fill" style="width:${pct}%;background:${color}"></div></div>
+        <div class="num">${n}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ---- KPIs ----
+  const total     = conds.length;
+  const active    = conds.filter(c=>clinStatus(c)==='active').length;
+  const severe    = conds.filter(c=>severityBand(c)==='severe').length;
+  const confirmed = conds.filter(c=>verStatus(c)==='confirmed').length;
+  $('kTotal').textContent     = total;
+  $('kActive').textContent    = active;
+  $('kSevere').textContent    = severe;
+  $('kConfirmed').textContent = confirmed;
+  $('kRate').textContent      = total ? Math.round((confirmed/total)*100)+'%' : '—';
+}
+
+function setAuto(on){
+  if(timer){clearInterval(timer);timer=null;}
+  if(on) timer = setInterval(load, 30000);
+}
+
+$('refreshBtn').addEventListener('click', load);
+$('resetBtn').addEventListener('click', ()=>{
+  $('reason').value='401303003'; $('category').value='encounter-diagnosis';
+  $('facility').value=''; $('dateFrom').value=''; $('dateTo').value='';
+  load();
+});
+$('autoRefresh').addEventListener('change', e=>setAuto(e.target.checked));
+['reason','category'].forEach(id=>$(id).addEventListener('change', load));
+['baseUrl','facility','dateFrom','dateTo'].forEach(id=>$(id).addEventListener('keydown', e=>{ if(e.key==='Enter') load(); }));
+
+/* ===== Full referral details (drill-down) ===== */
+// Anchored on the Patient: _revinclude walks OUT to everything that references them,
+// then _include:iterate walks back IN for the Encounter's Organization & Practitioner(Role).
+const REC_INCLUDES = [
+  '_revinclude=Encounter:subject',
+  '_revinclude=Condition:subject',
+  '_revinclude=Observation:subject',
+  '_revinclude=Procedure:subject',
+  '_revinclude=DiagnosticReport:subject',
+  '_include:iterate=Encounter:service-provider',
+  '_include:iterate=Encounter:participant',
+  '_include:iterate=PractitionerRole:practitioner',
+  '_include:iterate=PractitionerRole:organization'
+].join('&');
+const REC_ORDER = ['Patient','Encounter','Condition','Observation','Procedure','DiagnosticReport','PractitionerRole','Practitioner','Organization'];
+
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function practName(p){
+  const n=(p.name||[])[0]; if(!n) return 'Practitioner';
+  return [(n.prefix||[]).join(' '),(n.given||[]).join(' '),n.family,(n.suffix||[]).join(' ')].filter(Boolean).join(' ');
+}
+function obsValue(o){
+  if(o.valueQuantity) return (o.valueQuantity.value)+' '+(o.valueQuantity.unit||o.valueQuantity.code||'');
+  if(o.valueCodeableConcept) return ccText(o.valueCodeableConcept);
+  if(o.valueString) return o.valueString;
+  if(o.component) return o.component.map(c=>{ const v=c.valueQuantity; return ccText(c.code)+': '+(v?(v.value+' '+(v.unit||'')):'—'); }).join(' · ');
+  return '';
+}
+function resSummary(r){
+  switch(r.resourceType){
+    case 'Patient':         return {t: patientName(r), m:[r.gender, r.birthDate, patientId(r)]};
+    case 'Encounter':       return {t: 'Encounter — '+(ccText((r.type||[])[0])!=='—'?ccText((r.type||[])[0]):(r.class&&(r.class.display||r.class.code)||'')),
+                               m:['status: '+(r.status||'—'), r.class&&(r.class.display||r.class.code),
+                                  r.period?[fmtDate(r.period.start), r.period.end?fmtDate(r.period.end):''].filter(Boolean).join(' → '):'']};
+    case 'Condition':       return {t: ccText(r.code), m:['clinical: '+(clinStatus(r)||'—'), 'verify: '+(verStatus(r)||'—'), fmtDate(r.recordedDate||r.onsetDateTime)]};
+    case 'Observation':     return {t: ccText(r.code), m:['status: '+(r.status||'—'), obsValue(r), fmtDate(r.effectiveDateTime)]};
+    case 'Procedure':       return {t: ccText(r.code), m:['status: '+(r.status||'—'), fmtDate(r.performedDateTime)]};
+    case 'DiagnosticReport':return {t: ccText(r.code), m:['status: '+(r.status||'—'), fmtDate(r.effectiveDateTime)]};
+    case 'Practitioner':    return {t: practName(r), m:[r.qualification&&ccText(r.qualification[0]&&r.qualification[0].code)]};
+    case 'PractitionerRole':return {t: 'Practitioner role', m:[ccText((r.specialty||[])[0])]};
+    case 'Organization':    return {t: r.name||'Organization', m:[r.identifier&&r.identifier[0]?('NHFR '+r.identifier[0].value):'']};
+    default:                return {t: r.resourceType, m:[r.id]};
+  }
+}
+
+function renderRecord(bundle){
+  const resources = (bundle.entry||[]).map(e=>e.resource).filter(Boolean);
+  const pat = resources.find(r=>r.resourceType==='Patient');
+  $('recTitle').textContent = pat ? patientName(pat) : 'Full referral details';
+  $('recSub').textContent   = pat ? patientId(pat) : (resources.length+' resources');
+  if(!resources.length){ $('recContent').innerHTML = `<div class="empty">No resources returned for this patient.</div>`; return; }
+  const byType = {};
+  resources.forEach(r=>{ (byType[r.resourceType]=byType[r.resourceType]||[]).push(r); });
+  const ordered = [...REC_ORDER.filter(t=>byType[t]), ...Object.keys(byType).filter(t=>!REC_ORDER.includes(t))];
+  $('recContent').innerHTML = ordered.map(type=>{
+    const list = byType[type];
+    return `<div class="recsec">
+      <p class="sectitle">${type} <span class="badge">${list.length}</span></p>
+      ${list.map(r=>{
+        const s = resSummary(r);
+        const meta = (s.m||[]).filter(x=>x&&x!=='—').map(x=>`<span>${escapeHtml(x)}</span>`).join('');
+        return `<div class="rescard">
+          <div class="rt">${escapeHtml(s.t)}</div>
+          ${meta?`<div class="rmeta">${meta}</div>`:''}
+          <details><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(r,null,2))}</pre></details>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+}
+
+async function openRecord(pid){
+  if(!pid) return;
+  const base = $('baseUrl').value.replace(/\/+$/,'');
+  const url = `${base}/Patient?_id=${encodeURIComponent(pid)}&${REC_INCLUDES}`;
+  $('recModal').classList.add('open');
+  $('recTitle').textContent = 'Full referral details';
+  $('recSub').textContent = 'Loading…';
+  $('recContent').innerHTML = `<div class="loading"><div class="spinner"></div>Pulling the complete record…</div>`;
+  try{
+    const res = await fetch(url, {headers:{'Accept':'application/fhir+json'}});
+    if(!res.ok) throw new Error('HTTP '+res.status+' '+res.statusText);
+    renderRecord(await res.json());
+  }catch(err){
+    const msg = /Failed to fetch/.test(err.message)
+      ? 'Could not reach the FHIR server (network or CORS).' : err.message;
+    $('recContent').innerHTML = `<div class="error">⚠ ${msg}</div>`;
+    $('recSub').textContent = '—';
+  }
+}
+function closeRecord(){ $('recModal').classList.remove('open'); }
+
+$('rows').addEventListener('click', e=>{ const tr=e.target.closest('tr.rowlink'); if(tr) openRecord(tr.dataset.pid); });
+$('recClose').addEventListener('click', closeRecord);
+$('recModal').addEventListener('click', e=>{ if(e.target===$('recModal')) closeRecord(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeRecord(); });
+
+load();
+</script>
+</body>
+</html>

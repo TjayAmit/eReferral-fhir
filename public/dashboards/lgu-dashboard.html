@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LGU Referral Dashboard — PHO Aklan | PH eReferral</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#ffffff; --panel-2:#f8fafc; --ink:#0f172a; --muted:#64748b;
+    --line:#e2e8f0; --brand:#0e7490; --brand-2:#0891b2; --accent:#1d4ed8;
+    --requested:#d97706; --received:#2563eb; --accepted:#0d9488;
+    --in-progress:#7c3aed; --completed:#16a34a; --rejected:#dc2626; --unknown:#94a3b8;
+    --shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;
+    color:var(--ink);background:linear-gradient(180deg,#f1f5f9,#e2e8f0 240px,#eef2f6);
+    min-height:100vh;display:flex;flex-direction:column}
+  header.top{background:linear-gradient(110deg,#0e7490,#155e75);color:#fff;padding:18px 28px;
+    display:flex;align-items:center;gap:16px;box-shadow:var(--shadow)}
+  header.top .mark{width:42px;height:42px;border-radius:11px;background:rgba(255,255,255,.16);
+    display:grid;place-items:center;font-size:22px}
+  header.top h1{font-size:19px;margin:0;font-weight:650;letter-spacing:.2px}
+  header.top p{margin:2px 0 0;font-size:12.5px;opacity:.82}
+  header.top .spacer{flex:1}
+  header.top .env{font-size:11.5px;background:rgba(255,255,255,.14);padding:6px 11px;border-radius:999px}
+
+  .wrap{margin:0;padding:22px 5rem 60px;flex:1 0 auto;
+    display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start}
+  .main{grid-column:1;grid-row:1;min-width:0;display:flex;flex-direction:column;gap:18px}
+  .main > .kpis{margin:0}
+  .wrap > .controls{grid-column:2;grid-row:1;position:sticky;top:18px;align-self:start;margin:0}
+  @media(max-width:880px){ .wrap{display:block;padding:22px 20px 60px} .wrap > .controls{position:static;margin-bottom:18px} }
+
+  .controls{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:14px 16px;box-shadow:var(--shadow);display:grid;
+    grid-template-columns:1fr;gap:12px 14px;align-items:end}
+  .controls .full{grid-column:1/-1}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .field input,.field select{width:100%;min-width:0;padding:9px 10px;border:1px solid var(--line);border-radius:9px;
+    font-size:13px;background:var(--panel-2);color:var(--ink)}
+  .field input:focus,.field select:focus{outline:2px solid var(--brand-2);outline-offset:0;background-color:#fff}
+  .field select{-webkit-appearance:none;-moz-appearance:none;appearance:none;
+    background-color:var(--panel-2);
+    background-image:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%2364748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>');
+    background-repeat:no-repeat;background-position:right 10px center;padding-right:32px}
+  .btnrow{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  button.go{background:var(--brand);color:#fff;border:0;padding:10px 18px;border-radius:9px;
+    font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:var(--shadow)}
+  button.go:hover{background:#0b6275}
+  button.ghost{background:#fff;border:1px solid var(--line);color:var(--ink);padding:10px 14px;
+    border-radius:9px;font-size:13px;cursor:pointer}
+  .auto{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)}
+  .stamp{font-size:12px;color:var(--muted);margin-left:auto}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin:18px 0}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .kpi .v{font-size:30px;font-weight:720;line-height:1}
+  .kpi .l{font-size:12px;color:var(--muted);margin-top:7px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  .kpi .bar{position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--brand)}
+  .kpi.k-accept .bar{background:var(--completed)}
+  .kpi.k-pending .bar{background:var(--requested)}
+  .kpi.k-rate .bar{background:var(--accent)}
+
+  .grid2{display:grid;grid-template-columns:1.15fr 1fr;gap:16px;align-items:start}
+  @media(max-width:880px){.grid2{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+  .card h2{font-size:14px;margin:0;padding:14px 16px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:8px;background:var(--panel-2)}
+  .card h2 .count{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600}
+  .card .body{padding:14px 16px}
+
+  /* status bars */
+  .statusbars{display:flex;flex-direction:column;gap:11px}
+  .sb{display:grid;grid-template-columns:108px 1fr 34px;align-items:center;gap:10px}
+  .sb .name{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .track{height:10px;background:#eef2f6;border-radius:999px;overflow:hidden}
+  .fill{height:100%;border-radius:999px;transition:width .5s ease}
+  .sb .num{font-size:13px;font-weight:700;text-align:right}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);
+    padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel-2);position:sticky;top:0}
+  tbody td{padding:11px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+  tbody tr:hover{background:#f8fafc}
+  .tablewrap{max-height:560px;overflow:auto}
+  .pname{font-weight:650}
+  .sub{font-size:11.5px;color:var(--muted)}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;
+    font-size:11.5px;font-weight:650;white-space:nowrap}
+  .pill .dot{width:7px;height:7px}
+  .prio{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+  .prio.urgent,.prio.stat,.prio.asap{color:var(--rejected)}
+  .prio.routine{color:var(--muted)}
+
+  .empty,.loading,.error{padding:34px 16px;text-align:center;color:var(--muted);font-size:13.5px}
+  .error{color:var(--rejected)}
+  .spinner{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--brand);
+    border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .legend{font-size:11px;color:var(--muted);padding:10px 16px;border-top:1px solid var(--line);background:var(--panel-2)}
+  code{background:#eef2f6;padding:1px 6px;border-radius:5px;font-size:12px}
+  footer{max-width:1200px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:11.5px;text-align:center}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="mark">🏥</div>
+  <div>
+    <h1>LGU Referral Dashboard</h1>
+    <p>Provincial Health Office — Aklan · PH eReferral (PeReF) · read-only PHO view</p>
+  </div>
+  <div class="spacer"></div>
+  <div class="env" id="envChip">FHIRLab · live</div>
+</header>
+
+<div class="wrap">
+
+  <!-- ===== Filters ===== -->
+  <section class="controls">
+    <div class="field">
+      <label for="baseUrl">FHIR Base URL</label>
+      <input id="baseUrl" value="https://cdr.fhirlab.net/fhir" />
+    </div>
+    <div class="field">
+      <label for="reason">Reason (SNOMED)</label>
+      <select id="reason">
+        <option value="">All reasons</option>
+        <option value="398254007" selected>398254007 — Pre-eclampsia</option>
+        <option value="71388002">71388002 — Procedure</option>
+        <option value="22298006">22298006 — Myocardial infarction</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="category">Category (SNOMED)</label>
+      <select id="category">
+        <option value="">All categories</option>
+        <option value="73770003" selected>73770003 — Emergency</option>
+        <option value="50849002">50849002 — Emergency room admission</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="facility">Receiving facility (NHFR)</label>
+      <input id="facility" placeholder="e.g. 513" />
+    </div>
+    <div class="field">
+      <label for="dateFrom">Authored from</label>
+      <input id="dateFrom" type="date" />
+    </div>
+    <div class="field">
+      <label for="dateTo">Authored to</label>
+      <input id="dateTo" type="date" />
+    </div>
+    <div class="field btnrow full">
+      <button class="go" id="refreshBtn">⟳ Refresh data</button>
+      <button class="ghost" id="resetBtn">Reset filters</button>
+      <label class="auto"><input type="checkbox" id="autoRefresh" /> Auto-refresh (30s)</label>
+      <span class="stamp" id="stamp">—</span>
+    </div>
+  </section>
+
+  <main class="main">
+  <!-- ===== KPI cards ===== -->
+  <section class="kpis" id="kpis">
+    <div class="kpi"><div class="bar"></div><div class="v" id="kTotal">—</div><div class="l">Total referrals</div></div>
+    <div class="kpi k-pending"><div class="bar"></div><div class="v" id="kPending">—</div><div class="l">Awaiting action</div></div>
+    <div class="kpi k-accept"><div class="bar"></div><div class="v" id="kAccepted">—</div><div class="l">Accepted / in care</div></div>
+    <div class="kpi"><div class="bar"></div><div class="v" id="kCompleted">—</div><div class="l">Completed</div></div>
+    <div class="kpi k-rate"><div class="bar"></div><div class="v" id="kRate">—</div><div class="l">Acceptance rate</div></div>
+  </section>
+
+  <div class="grid2">
+    <!-- ===== Referral list ===== -->
+    <section class="card">
+      <h2>📋 Referrals <span class="count" id="rowCount"></span></h2>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Patient</th><th>Reason</th><th>Priority</th><th>Authored</th><th>Receiving facility</th><th>Status</th></tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td colspan="6"><div class="loading"><div class="spinner"></div>Loading referrals…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="legend">Status is read from the referral <code>Task</code>; rows without a Task fall back to the <code>ServiceRequest.status</code>.</div>
+    </section>
+
+    <!-- ===== Status board ===== -->
+    <section class="card">
+      <h2>📊 Referrals by status</h2>
+      <div class="body">
+        <div class="statusbars" id="statusBars">
+          <div class="loading"><div class="spinner"></div>Loading…</div>
+        </div>
+      </div>
+      <div class="legend">Counts from referral <code>Task.status</code> across the current filter.</div>
+    </section>
+  </div>
+  </main>
+</div>
+
+<footer>
+  PH eReferral · FHIR R4 · Folder C (LGU Dashboard) — generated live from
+  <span id="srcUrl">the FHIR server</span>. This is a read-only PHO reporting view.
+</footer>
+
+<script>
+const STATUSES = [
+  {key:'requested',   label:'Requested',   color:'var(--requested)'},
+  {key:'received',    label:'Received',    color:'var(--received)'},
+  {key:'accepted',    label:'Accepted',    color:'var(--accepted)'},
+  {key:'in-progress', label:'In-progress', color:'var(--in-progress)'},
+  {key:'completed',   label:'Completed',   color:'var(--completed)'},
+  {key:'rejected',    label:'Rejected',    color:'var(--rejected)'},
+];
+const COLOR = Object.fromEntries(STATUSES.map(s=>[s.key,s.color]));
+const $ = id => document.getElementById(id);
+let timer = null;
+
+function buildUrl(){
+  const base = $('baseUrl').value.replace(/\/+$/,'');
+  const p = new URLSearchParams();
+  p.append('_include','ServiceRequest:subject');
+  p.append('_revinclude','Task:focus');
+  p.append('_count','100');
+  p.append('_sort','-authored');
+  const cat = $('category').value,
+        fac = $('facility').value.trim(), df = $('dateFrom').value, dt = $('dateTo').value;
+  // NOTE: `reason-code` is NOT a valid R4 search param for ServiceRequest, so reason is
+  // filtered client-side (see render()). Category IS a valid search param — keep it server-side.
+  if(cat)    p.append('category', cat);
+  if(fac)    p.append('performer.identifier', 'https://fhir.doh.gov.ph/phcore/Identifier/doh-nhfr-code|'+fac);
+  if(df)     p.append('authored','ge'+df);
+  if(dt)     p.append('authored','le'+dt);
+  return base + '/ServiceRequest?' + p.toString();
+}
+
+function patientName(p){
+  if(!p) return 'Unknown patient';
+  const n = (p.name||[])[0];
+  if(!n) return 'Unnamed · ' + (p.id||'');
+  return [(n.given||[]).join(' '), n.family].filter(Boolean).join(' ') || n.text || 'Unnamed';
+}
+function patientId(p){
+  const ids = (p&&p.identifier)||[];
+  const ph = ids.find(i=>(i.system||'').includes('philhealth'));
+  return ph ? 'PhilHealth ' + ph.value : (ids[0] ? ids[0].value : (p?p.id:''));
+}
+function refText(cc){
+  if(!cc) return '—';
+  return cc.text || (cc.coding&&cc.coding[0]&&(cc.coding[0].display||cc.coding[0].code)) || '—';
+}
+function performerText(sr){
+  const perf = (sr.performer||[])[0];
+  if(!perf) return '—';
+  return perf.display || (perf.identifier ? 'NHFR '+perf.identifier.value : perf.reference) || '—';
+}
+function fmtDate(d){
+  if(!d) return '—';
+  const dt = new Date(d);
+  return isNaN(dt) ? d : dt.toLocaleString('en-PH',{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function statusPill(s){
+  const c = COLOR[s] || 'var(--unknown)';
+  const label = s ? s.replace('-',' ') : 'no task';
+  return `<span class="pill" style="background:${c}1a;color:${c}">
+            <span class="dot" style="background:${c}"></span>${label}</span>`;
+}
+
+async function load(){
+  const url = buildUrl();
+  $('srcUrl').textContent = url;
+  $('rows').innerHTML = `<tr><td colspan="6"><div class="loading"><div class="spinner"></div>Querying FHIR server…</div></td></tr>`;
+  $('statusBars').innerHTML = `<div class="loading"><div class="spinner"></div>Loading…</div>`;
+  try{
+    const res = await fetch(url, {headers:{'Accept':'application/fhir+json'}});
+    if(!res.ok) throw new Error('HTTP '+res.status+' '+res.statusText);
+    const bundle = await res.json();
+    render(bundle);
+    $('stamp').textContent = 'Updated ' + new Date().toLocaleTimeString('en-PH');
+  }catch(err){
+    const msg = /Failed to fetch/.test(err.message)
+      ? 'Could not reach the FHIR server (network or CORS). Check the Base URL and that the server allows browser requests.'
+      : err.message;
+    $('rows').innerHTML = `<tr><td colspan="6"><div class="error">⚠ ${msg}</div></td></tr>`;
+    $('statusBars').innerHTML = `<div class="error">⚠ ${msg}</div>`;
+  }
+}
+
+function render(bundle){
+  const entries = (bundle.entry||[]).map(e=>e.resource).filter(Boolean);
+  let srs = entries.filter(r=>r.resourceType==='ServiceRequest');
+  // reason-code isn't a server search param on this HAPI build — filter it here instead
+  const reasonFilter = $('reason').value;
+  if(reasonFilter){
+    srs = srs.filter(sr => (sr.reasonCode||[]).some(cc => (cc.coding||[]).some(c => c.code===reasonFilter)));
+  }
+  const pats  = {}; entries.filter(r=>r.resourceType==='Patient').forEach(p=>pats[p.id]=p);
+  const tasks = entries.filter(r=>r.resourceType==='Task');
+
+  // map ServiceRequest id -> latest Task focused on it
+  const taskBySr = {};
+  tasks.forEach(t=>{
+    const ref = t.focus && t.focus.reference;
+    if(!ref) return;
+    const srId = ref.split('/').pop();
+    const prev = taskBySr[srId];
+    if(!prev || new Date(t.lastModified||t.authoredOn||0) >= new Date(prev.lastModified||prev.authoredOn||0))
+      taskBySr[srId] = t;
+  });
+
+  // ---- table rows ----
+  if(!srs.length){
+    $('rows').innerHTML = `<tr><td colspan="6"><div class="empty">No referrals match the current filter.</div></td></tr>`;
+  }else{
+    $('rows').innerHTML = srs.map(sr=>{
+      const pid = sr.subject && sr.subject.reference ? sr.subject.reference.split('/').pop() : null;
+      const pat = pid ? pats[pid] : null;
+      const task = taskBySr[sr.id];
+      const status = task ? task.status : (sr.status==='active'?'requested':sr.status);
+      const prio = (sr.priority||'routine');
+      return `<tr>
+        <td><div class="pname">${patientName(pat)}</div><div class="sub">${patientId(pat)}</div></td>
+        <td>${refText(sr.reasonCode&&sr.reasonCode[0]||sr.code)}<div class="sub">${refText(sr.category&&sr.category[0])}</div></td>
+        <td><span class="prio ${prio}">${prio}</span></td>
+        <td>${fmtDate(sr.authoredOn)}</td>
+        <td>${performerText(sr)}</td>
+        <td>${statusPill(status)}</td>
+      </tr>`;
+    }).join('');
+  }
+  $('rowCount').textContent = srs.length + (bundle.total!=null ? ' of '+bundle.total : '') + ' shown';
+
+  // ---- status counts (from tasks) ----
+  const counts = Object.fromEntries(STATUSES.map(s=>[s.key,0]));
+  Object.values(taskBySr).forEach(t=>{ if(counts[t.status]!=null) counts[t.status]++; });
+  const total = srs.length || Object.values(counts).reduce((a,b)=>a+b,0);
+  const max = Math.max(1, ...Object.values(counts));
+
+  $('statusBars').innerHTML = STATUSES.map(s=>{
+    const n = counts[s.key];
+    const pct = Math.round((n/max)*100);
+    return `<div class="sb">
+      <div class="name"><span class="dot" style="background:${s.color}"></span>${s.label}</div>
+      <div class="track"><div class="fill" style="width:${pct}%;background:${s.color}"></div></div>
+      <div class="num">${n}</div>
+    </div>`;
+  }).join('');
+
+  // ---- KPIs ----
+  const pending  = counts.requested + counts.received;
+  const inCare   = counts.accepted + counts['in-progress'];
+  const engaged  = counts.accepted + counts['in-progress'] + counts.completed;
+  const decided  = engaged + counts.rejected;
+  $('kTotal').textContent     = total;
+  $('kPending').textContent   = pending;
+  $('kAccepted').textContent  = inCare;
+  $('kCompleted').textContent = counts.completed;
+  $('kRate').textContent      = decided ? Math.round((engaged/decided)*100)+'%' : '—';
+}
+
+function setAuto(on){
+  if(timer){clearInterval(timer);timer=null;}
+  if(on) timer = setInterval(load, 30000);
+}
+
+$('refreshBtn').addEventListener('click', load);
+$('resetBtn').addEventListener('click', ()=>{
+  $('reason').value='398254007'; $('category').value='73770003';
+  $('facility').value=''; $('dateFrom').value=''; $('dateTo').value='';
+  load();
+});
+$('autoRefresh').addEventListener('change', e=>setAuto(e.target.checked));
+['reason','category'].forEach(id=>$(id).addEventListener('change', load));
+['baseUrl','facility','dateFrom','dateTo'].forEach(id=>$(id).addEventListener('keydown', e=>{ if(e.key==='Enter') load(); }));
+
+load();
+</script>
+</body>
+</html>

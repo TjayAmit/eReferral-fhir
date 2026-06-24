@@ -18,5 +18,12 @@
     "role": "practitioner",
     "practitionerId": "16570",
     "id": "user-1782219490848"
+  },
+  {
+    "email": "juansmith@mailinator.com",
+    "password": "password",
+    "role": "practitioner",
+    "practitionerId": "16802",
+    "id": "user-1782264286413"
   }
 ]
