@@ -515,8 +515,8 @@ export default function SubmitPage() {
                 value: p.id,
                 label: practName(p),
               }))}
-              placeholder={input.selectedReceivingRoleId ? "Search practitioners…" : "Select role first"}
-              disabled={!input.selectedReceivingRoleId}
+              placeholder={input.selectedReceivingOrgId ? "Search practitioners…" : "Select receiving org first"}
+              disabled={!input.selectedReceivingOrgId}
               emptyText="No practitioners found"
             />
           </div>

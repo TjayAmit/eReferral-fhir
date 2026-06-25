@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { fhirGet, fhirPost, FhirError } from "@/lib/fhir";
 import { buildNextTask, latestTask, humanName, formatAddress, firstPhone } from "@/lib/referral";
 import TaskHistory from "./TaskHistory";
+import Modal from "./Modal";
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -452,14 +453,17 @@ function Section({ title, resource, fhirBadge, count, children }: { title: strin
 // ── Referral detail view ────────────────────────────────────────────────────
 
 export default function ReferralDetailView({
-  sr, task: taskProp, onBack, onChanged, showActions = true,
-}: { sr: any; task?: any | null; onBack?: () => void; onChanged?: (t: any) => void; showActions?: boolean }) {
+  sr, task: taskProp, onBack, onChanged, showActions = true, defaultTab = "referral",
+}: { sr: any; task?: any | null; onBack?: () => void; onChanged?: (t: any) => void; showActions?: boolean; defaultTab?: "referral" | "clinical" }) {
   const [detail, setDetail] = useState<DetailData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"referral" | "clinical">("referral");
+  const [activeTab, setActiveTab] = useState<"referral" | "clinical">(defaultTab);
+  const [noteModalOpen, setNoteModalOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState("");
 
   // Task from detail fetch is fresher (has latest status)
   const activeTask = detail?.task ?? taskProp;
@@ -498,16 +502,13 @@ export default function ReferralDetailView({
         `&_include=ServiceRequest:performer` +
         `&_include=ServiceRequest:encounter` +
         `&_include:iterate=PractitionerRole:organization` +
-        `&_include:iterate=PractitionerRole:practitioner` +
-        `&_revinclude=Task:focus` +
-        `&_include=Task:owner`
+        `&_include:iterate=PractitionerRole:practitioner`
       );
 
       const all = dedupeResources(bundle);
       const orgs = all.filter((r) => r.resourceType === "Organization");
       const roles = all.filter((r) => r.resourceType === "PractitionerRole");
       const practitioners = all.filter((r) => r.resourceType === "Practitioner");
-      const provenances = all.filter((r) => r.resourceType === "Provenance");
 
       // Resolve an Organization from a reference that may point either directly at
       // an Organization or at a PractitionerRole that carries an organization link.
@@ -537,13 +538,22 @@ export default function ReferralDetailView({
       };
 
       const patient = all.find((r) => r.resourceType === "Patient") || null;
-      const tasks = all.filter((r) => r.resourceType === "Task");
-      const task = latestTask(tasks);
 
       const collect = (b: any, rt: string): any[] =>
         (b?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === rt);
 
-      // Fetch Provenance separately (removed from main query to avoid HAPI hang)
+      // Fetch Task and Provenance separately (removed from main query to avoid HAPI hang)
+      let task = taskProp || null;
+      if (!task) {
+        try {
+          const taskBundle = await fhirGet(`Task?focus=ServiceRequest/${sr.id}&_sort=-_lastUpdated&_count=1`);
+          const tasks = collect(taskBundle, "Task");
+          task = latestTask(tasks);
+        } catch {
+          /* ignore task fetch errors */
+        }
+      }
+
       let latestProvenance: any = null;
       try {
         const provBundle = await fhirGet(`Provenance?target=ServiceRequest/${sr.id}&_sort=-_lastUpdated&_count=1`);
@@ -652,21 +662,41 @@ export default function ReferralDetailView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { retrieve(); }, [sr?.id]);
 
-  async function applyAction(s: string, needsNote?: boolean) {
-    if (!activeTask) return;
-    let reason: string | undefined;
-    if (needsNote) {
-      const promptText = s === "rejected" ? "Reason for rejection?" : "Completion notes (optional)?";
-      reason = window.prompt(promptText) || undefined;
-      if (reason === undefined) return;
-    }
+  function openNoteModal(s: string) {
+    setPendingAction(s);
+    setNoteText("");
+    setNoteModalOpen(true);
+  }
+
+  async function confirmAction() {
+    if (!activeTask || !pendingAction) return;
+    const s = pendingAction;
+    const reason = noteText.trim() || undefined;
+    setNoteModalOpen(false);
     setBusy(s); setNotice(null); setError(null);
     try {
       const newTask = buildNextTask(activeTask, s, reason);
       const updated = await fhirPost("Task", newTask);
       setNotice(`Action point updated → ${s}`);
       onChanged?.(updated);
-      // Refresh to pull the new status
+      retrieve();
+    } catch (e) {
+      setError(e instanceof FhirError ? e.message : String(e));
+    } finally { setBusy(null); setPendingAction(null); }
+  }
+
+  async function applyAction(s: string, needsNote?: boolean) {
+    if (!activeTask) return;
+    if (needsNote) {
+      openNoteModal(s);
+      return;
+    }
+    setBusy(s); setNotice(null); setError(null);
+    try {
+      const newTask = buildNextTask(activeTask, s, undefined);
+      const updated = await fhirPost("Task", newTask);
+      setNotice(`Action point updated → ${s}`);
+      onChanged?.(updated);
       retrieve();
     } catch (e) {
       setError(e instanceof FhirError ? e.message : String(e));
@@ -708,6 +738,39 @@ export default function ReferralDetailView({
         </div>
       </div>
 
+      <Modal
+        isOpen={noteModalOpen}
+        onClose={() => { setNoteModalOpen(false); setPendingAction(null); }}
+        title={pendingAction === "rejected" ? "Reason for Rejection" : pendingAction === "completed" ? "Completion Notes" : "Add Note"}
+      >
+        <p className="muted" style={{ fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+          {pendingAction === "rejected"
+            ? "Describe why this referral is being rejected."
+            : "Describe the patient's current status and outcome."}
+        </p>
+        <div className="field">
+          <label htmlFor="action-note">
+            {pendingAction === "rejected" ? "Reason for rejection" : "Completion notes"}
+          </label>
+          <textarea
+            id="action-note"
+            rows={3}
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            placeholder={pendingAction === "rejected" ? "Enter reason for rejecting this referral…" : "Enter completion notes…"}
+            autoFocus
+          />
+        </div>
+        <div className="modal-footer" style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button type="button" className="ghost" onClick={() => { setNoteModalOpen(false); setPendingAction(null); }}>
+            Cancel
+          </button>
+          <button type="button" onClick={confirmAction} disabled={!!busy || (pendingAction === "rejected" && !noteText.trim())}>
+            {busy ? "Submitting…" : "Confirm"}
+          </button>
+        </div>
+      </Modal>
+
       {notice && <div className="alert ok">✅ {notice}</div>}
       {error && <div className="alert err">❌ {error}</div>}
       {loading && <p className="muted">Loading referral details…</p>}
@@ -716,22 +779,6 @@ export default function ReferralDetailView({
         <>
           {/* Tabs */}
           <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e5e7eb", marginBottom: 16 }}>
-            <button
-              onClick={() => setActiveTab("referral")}
-              style={{
-                padding: "10px 20px",
-                border: "none",
-                borderBottom: activeTab === "referral" ? "2px solid #2563eb" : "2px solid transparent",
-                background: "transparent",
-                color: activeTab === "referral" ? "#2563eb" : "#6b7280",
-                fontWeight: activeTab === "referral" ? 600 : 400,
-                fontSize: 14,
-                cursor: "pointer",
-                marginBottom: -1,
-              }}
-            >
-              Referral Details
-            </button>
             <button
               onClick={() => setActiveTab("clinical")}
               style={{
@@ -747,6 +794,22 @@ export default function ReferralDetailView({
               }}
             >
               Clinical Details
+            </button>
+            <button
+              onClick={() => setActiveTab("referral")}
+              style={{
+                padding: "10px 20px",
+                border: "none",
+                borderBottom: activeTab === "referral" ? "2px solid #2563eb" : "2px solid transparent",
+                background: "transparent",
+                color: activeTab === "referral" ? "#2563eb" : "#6b7280",
+                fontWeight: activeTab === "referral" ? 600 : 400,
+                fontSize: 14,
+                cursor: "pointer",
+                marginBottom: -1,
+              }}
+            >
+              Referral Details
             </button>
           </div>
 

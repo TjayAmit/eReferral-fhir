@@ -53,7 +53,7 @@ const EMPTY_CU = {
   treatment: "", labTitle: "", labConclusion: "",
 };
 
-export default function ClinicalWaitingViewPage() {
+export default function ClinicalTransferViewPage() {
   const { user, ready } = useAuth();
   const { baseUrl, useDemoData } = useSettings();
   const router = useRouter();
@@ -79,6 +79,14 @@ export default function ClinicalWaitingViewPage() {
     diagnosticReportId: "",
   });
   useEffect(() => {
+    // Redirect old route to new route
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/clinical/waiting/")) {
+      const id = window.location.pathname.split("/").pop();
+      if (id) {
+        router.replace(`/clinical/transfer/${id}`);
+        return;
+      }
+    }
     if (ready && user && !canAccess) router.replace("/");
   }, [ready, user, canAccess, router]);
 
@@ -91,7 +99,7 @@ export default function ClinicalWaitingViewPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/clinical-waiting?encounter=${encodeURIComponent(encounterId)}`, {
+      const res = await fetch(`/api/clinical-transfer?encounter=${encodeURIComponent(encounterId)}`, {
         headers: { "X-FHIR-Base-Url": baseUrl },
       });
       const data = await res.json();
@@ -225,7 +233,7 @@ export default function ClinicalWaitingViewPage() {
       <AppPageHeader
         items={[
           { label: "Home", href: "/" },
-          { label: "Clinical Waiting", href: "/clinical/waiting" },
+          { label: "Clinical Transfer", href: "/clinical/transfer" },
           { label: enc ? `Encounter ${enc.id}` : encounterId },
         ]}
         title={`Patient Vitals Encounter — ${patient ? humanName(patient.name) : encounterId}`}

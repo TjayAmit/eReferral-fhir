@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
-import ReferralDetailView from "@/components/ReferralDetailView";
 import { useAuth } from "@/lib/auth";
 import { fhirGet, FhirError } from "@/lib/fhir";
 import { humanName, latestTask } from "@/lib/referral";
@@ -19,7 +18,7 @@ import {
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
-type ReferralItem = { sr: any; task: any | null; patient: any | null };
+type ReferralItem = { sr: any; task: any | null; patient: any | null; orgById: Map<string, any>; roleById: Map<string, any> };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +40,32 @@ function dedupeResources(bundle: any): any[] {
   return out;
 }
 
+function getRequestingOrganization(item: ReferralItem): string {
+  const { sr, orgById, roleById } = item;
+  const requesterRef = sr.requester?.reference;
+  if (!requesterRef) return "—";
+
+  // Direct Organization reference
+  if (requesterRef.includes("Organization/")) {
+    const orgId = refId(requesterRef);
+    const org = orgById.get(orgId);
+    if (org?.name) return org.name;
+  }
+
+  // PractitionerRole reference - get organization from role
+  if (requesterRef.includes("PractitionerRole/")) {
+    const roleId = refId(requesterRef);
+    const role = roleById.get(roleId);
+    if (role?.organization?.reference) {
+      const orgId = refId(role.organization.reference);
+      const org = orgById.get(orgId);
+      if (org?.name) return org.name;
+    }
+  }
+
+  return "—";
+}
+
 // ── Status filter pills ───────────────────────────────────────────────────────
 
 const STATUSES = ["requested", "received", "accepted", "rejected", "completed"] as const;
@@ -60,7 +85,6 @@ export default function IncomingReferralsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [selected, setSelected] = useState<ReferralItem | null>(null);
   const PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -79,7 +103,7 @@ export default function IncomingReferralsPage() {
     setLoading(true); setError(null);
     try {
       const bundle = await fhirGet(
-        `ServiceRequest?performer=Organization/${orgId}&_include=ServiceRequest:subject&_revinclude=Task:focus&_sort=-authored&_count=100`
+        `ServiceRequest?performer=Organization/${orgId}&_include=ServiceRequest:subject&_include=ServiceRequest:requester&_revinclude=Task:focus&_sort=-authored&_count=100`
       );
 
       const all = dedupeResources(bundle);
@@ -87,6 +111,12 @@ export default function IncomingReferralsPage() {
 
       const patientById = new Map<string, any>(
         all.filter((r) => r.resourceType === "Patient").map((p) => [p.id, p])
+      );
+      const orgById = new Map<string, any>(
+        all.filter((r) => r.resourceType === "Organization").map((o) => [o.id, o])
+      );
+      const roleById = new Map<string, any>(
+        all.filter((r) => r.resourceType === "PractitionerRole").map((role) => [role.id, role])
       );
       const tasksBySrId = new Map<string, any[]>();
       for (const t of all.filter((r) => r.resourceType === "Task")) {
@@ -101,22 +131,12 @@ export default function IncomingReferralsPage() {
         sr,
         task:    latestTask(tasksBySrId.get(sr.id) || []) || null,
         patient: patientById.get(refId(sr.subject?.reference || "")) || null,
+        orgById,
+        roleById,
       })));
     } catch (e) {
       setError(e instanceof FhirError ? e.message : String(e));
     } finally { setLoading(false); }
-  }
-
-  if (!ready) return <div className="loading">Loading…</div>;
-  if (!user) return null;
-
-  if (!orgId) {
-    return (
-      <>
-        <AppPageHeader items={[{ label: "Home", href: "/" }, { label: "Incoming Referrals" }]} title="Incoming Referrals" />
-        <div className="alert err">No organization linked to your account — contact an admin.</div>
-      </>
-    );
   }
 
   const statusCounts = items.reduce<Record<string, number>>((acc, { sr, task }) => {
@@ -151,9 +171,9 @@ export default function IncomingReferralsPage() {
       cell: (info: any) => info.getValue() || "—",
     },
     {
-      id: "reason",
-      header: "Reason",
-      accessorFn: (row: ReferralItem) => row.sr.category?.[0]?.coding?.[0]?.display || row.sr.category?.[0]?.text || "",
+      id: "requestingOrg",
+      header: "Organization",
+      accessorFn: (row: ReferralItem) => getRequestingOrganization(row),
       cell: (info: any) => info.getValue() || "—",
     },
     {
@@ -198,25 +218,17 @@ export default function IncomingReferralsPage() {
   const totalPages = Math.max(1, table.getPageCount());
   const pageRows = table.getRowModel().rows;
 
-  if (selected) {
+  // Guards come AFTER all hooks so the hook order stays identical across renders.
+  // (auth resolving the org calls setUser, which would otherwise change how many
+  // hooks run between renders and crash with "Rendered more hooks…".)
+  if (!ready) return <div className="loading">Loading…</div>;
+  if (!user) return null;
+
+  if (!orgId) {
     return (
       <>
-        <AppPageHeader
-          items={[
-            { label: "Home", href: "/" },
-            { label: "Incoming Referrals", href: "/ereferral/incoming" },
-            { label: selected.sr?.identifier?.[0]?.value || selected.sr?.id },
-          ]}
-          title={`Referral: ${selected.sr?.identifier?.[0]?.value || selected.sr?.id || "Detail"}`}
-        />
-        <ReferralDetailView
-          sr={selected.sr}
-          task={selected.task}
-          onBack={() => setSelected(null)}
-          onChanged={(updatedTask) =>
-            setSelected((prev) => prev ? { ...prev, task: updatedTask } : prev)
-          }
-        />
+        <AppPageHeader items={[{ label: "Home", href: "/" }, { label: "Incoming Referrals" }]} title="Incoming Referrals" />
+        <div className="alert err">No organization linked to your account — contact an admin.</div>
       </>
     );
   }
@@ -312,7 +324,7 @@ export default function IncomingReferralsPage() {
                   <tr
                     key={row.original.sr.id}
                     className="clickable"
-                    onClick={() => setSelected(items.find((i) => i.sr.id === row.original.sr.id) || null)}
+                    onClick={() => router.push(`/ereferral/incoming/${row.original.sr.id}`)}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>

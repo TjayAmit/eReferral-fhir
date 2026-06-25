@@ -29,7 +29,7 @@ const collect = (b: any) => (b?.entry || []).map((e: any) => e.resource).filter(
 //   ?serviceProvider=<orgId>  → Clinical Update LIST: triage encounters originating
 //                               at our org (we set serviceProvider = hospitalization.origin),
 //                               each paired with its Patient. Excludes patients with
-//                               ServiceRequest or ReferralRequest (those go to Clinical Waiting).
+//                               ServiceRequest or ReferralRequest (those go to Clinical Transfer).
 //   ?encounter=<encId>        → Clinical Update VIEW: one Encounter + its Patient +
 //                               Observations (+ Conditions/Procedures) for display/update.
 //   ?patient=<patId>          → all clinical resources recorded for a patient (latest first).

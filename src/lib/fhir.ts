@@ -63,12 +63,19 @@ export async function submitTransaction(bundle: any, baseUrl?: string) {
 }
 
 /** Generic search / read (path is relative to the base, e.g. "Task?status=requested"). */
-export async function fhirGet(path: string, baseUrl?: string) {
-  const res = await fetch(`${baseUrl || getCurrentFhirBaseUrl()}/${path.replace(/^\//, "")}`, {
-    headers: { Accept: FHIR_JSON },
-    cache: "no-store",
-  });
-  return parse(res);
+export async function fhirGet(path: string, baseUrl?: string, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${baseUrl || getCurrentFhirBaseUrl()}/${path.replace(/^\//, "")}`, {
+      headers: { Accept: FHIR_JSON },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    return await parse(res);
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 /** Use Case 2 — retrieve the whole referral as one Bundle via the patient compartment. */

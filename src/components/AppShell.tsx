@@ -122,8 +122,8 @@ const SYSTEM_NAV: Record<System, { group: string; items: NavItem[] }[]> = {
           ),
         },
         {
-          href: "/clinical/waiting",
-          label: "Clinical Waiting",
+          href: "/clinical/transfer",
+          label: "Clinical Transfer",
           icon: (
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
           ),
@@ -133,20 +133,13 @@ const SYSTEM_NAV: Record<System, { group: string; items: NavItem[] }[]> = {
   ],
   "ereferral": [
     {
-      group: "Referral",
+      group: "Referrals",
       items: [
         {
           href: "/ereferral",
           label: "Overview",
           icon: (
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-          ),
-        },
-        {
-          href: "/ereferral/submit",
-          label: "New Referral",
-          icon: (
-            <svg viewBox="0 0 24 24"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>
           ),
         },
         {
@@ -157,17 +150,29 @@ const SYSTEM_NAV: Record<System, { group: string; items: NavItem[] }[]> = {
           ),
         },
         {
-          href: "/ereferral/draft",
-          label: "Draft Referrals",
-          icon: (
-            <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-          ),
-        },
-        {
           href: "/ereferral/incoming",
           label: "Incoming Referrals",
           icon: (
             <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          ),
+        },
+      ],
+    },
+    {
+      group: "Create",
+      items: [
+        {
+          href: "/ereferral/submit",
+          label: "New Referral",
+          icon: (
+            <svg viewBox="0 0 24 24"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>
+          ),
+        },
+        {
+          href: "/ereferral/draft",
+          label: "Draft Referrals",
+          icon: (
+            <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
           ),
         },
       ],
@@ -231,7 +236,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem("eref_active_system", system);
     } catch { /* ignore */ }
-    router.push(SYSTEM_ROOT[system]);
+    const target = SYSTEM_ROOT[system];
+    if (pathname !== target) {
+      try {
+        router.push(target);
+      } catch {
+        // Fallback to hard navigation if client-side routing fails
+        window.location.href = target;
+      }
+    }
   };
 
   const isLogin = pathname === "/login";
@@ -266,7 +279,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={`${section.group || "clinical"}-${n.label}-${n.href}`}
                   href={n.href}
-                  className={isActive(n.href, pathname) ? "active" : ""}
+                  className={n.label === "Overview" || isActive(n.href, pathname) ? "active" : ""}
                 >
                   <span className="ic" aria-hidden>{n.icon}</span>
                   <span>{n.label}</span>

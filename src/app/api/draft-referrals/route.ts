@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     }
 
     // ── LIST: Encounters with draft ServiceRequest ──────────────────────
-    // Uses Encounter _has reverse chaining so the response shape matches clinical-waiting.
+    // Uses Encounter _has reverse chaining so the response shape matches clinical-transfer.
     const bundle = await fhirGet(
       `Encounter?_has:ServiceRequest:encounter:requester=PractitionerRole/${practitionerRole}&_has:ServiceRequest:encounter:status=draft&_revinclude=ServiceRequest:encounter&_include=Encounter:subject&_sort=-date&_count=100`,
       baseUrl,

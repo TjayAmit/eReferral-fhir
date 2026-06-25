@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fhirGet, FhirError } from "@/lib/fhir";
+import { humanName } from "@/lib/referral";
 
 const STATUS_META: Record<string, { color: string; bg: string; label: string }> = {
   requested: { color: "#3b82f6", bg: "#eff6ff", label: "Requested" },
@@ -23,12 +24,51 @@ export default function TaskHistory({ serviceRequestId }: { serviceRequestId: st
       setError(null);
       try {
         const bundle = await fhirGet(
-          `Task?focus=ServiceRequest/${serviceRequestId}&_include=Task:focus&_include=Task:patient&_include=Task:owner&_sort=-authored-on&_count=50`
+          `Task?focus=ServiceRequest/${serviceRequestId}&_include=Task:focus&_include=Task:patient&_include=Task:requester&_include=Task:owner&_include:iterate=PractitionerRole:practitioner&_include:iterate=PractitionerRole:organization&_sort=-authored-on&_count=50`
         );
-        const all = (bundle.entry || [])
-          .map((e: any) => e.resource)
-          .filter((r: any) => r?.resourceType === "Task");
-        const sorted = all.sort(
+        const allResources = (bundle.entry || []).map((e: any) => e.resource);
+        const orgs = new Map<string, any>(allResources.filter((r: any) => r?.resourceType === "Organization").map((r: any) => [r.id, r]));
+        const roles = new Map<string, any>(allResources.filter((r: any) => r?.resourceType === "PractitionerRole").map((r: any) => [r.id, r]));
+        const practitioners = new Map<string, any>(allResources.filter((r: any) => r?.resourceType === "Practitioner").map((r: any) => [r.id, r]));
+
+        const resolveName = (ref: string, display?: string): string => {
+          if (!ref) return display || "—";
+          const [type, id] = ref.split("/");
+          if (!id) return display || ref;
+
+          if (type === "Organization") {
+            const org = orgs.get(id);
+            return org?.name || display || ref;
+          }
+
+          if (type === "Practitioner") {
+            const pract = practitioners.get(id);
+            return humanName(pract?.name) || display || ref;
+          }
+
+          if (type === "PractitionerRole") {
+            const role = roles.get(id);
+            const practRef = role?.practitioner?.reference;
+            if (practRef) {
+              const practId = practRef.split("/")[1];
+              if (practId) {
+                const pract = practitioners.get(practId);
+                return humanName(pract?.name) || display || ref;
+              }
+            }
+            return display || ref;
+          }
+
+          return display || ref;
+        };
+
+        const all = allResources.filter((r: any) => r?.resourceType === "Task");
+        const enriched = all.map((t: any) => ({
+          ...t,
+          _resolvedRequester: resolveName(t.requester?.reference, t.requester?.display),
+          _resolvedOwner: resolveName(t.owner?.reference, t.owner?.display),
+        }));
+        const sorted = enriched.sort(
           (a: any, b: any) =>
             new Date(a.authoredOn || 0).getTime() - new Date(b.authoredOn || 0).getTime()
         );
@@ -70,8 +110,8 @@ export default function TaskHistory({ serviceRequestId }: { serviceRequestId: st
 
         {tasks.map((t, idx) => {
           const meta = STATUS_META[t.status] || { color: "#64748b", bg: "#f8fafc", label: t.status };
-          const requester = t.requester?.display || t.requester?.reference || "—";
-          const owner = t.owner?.display || t.owner?.reference || "—";
+          const requester = t._resolvedRequester || "—";
+          const owner = t._resolvedOwner || "—";
           const note = t.note?.[0]?.text;
           const isLast = idx === tasks.length - 1;
 

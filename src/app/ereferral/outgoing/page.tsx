@@ -73,7 +73,7 @@ export default function OutgoingReferralsPage() {
     setError(null);
     try {
       const bundle = await fhirGet(
-        `Task?requester=PractitionerRole/${practitionerRoleId}&_include=Task:focus&_include=Task:patient&_sort=-authored-on&_count=100`
+        `Task?requester=PractitionerRole/${practitionerRoleId}&_include=Task:focus&_include=Task:patient&_include=Task:owner&_include:iterate=ServiceRequest:performer&_sort=-authored-on&_count=100`
       );
       setIndex(buildIndex(bundle));
       setTasks(
@@ -89,11 +89,23 @@ export default function OutgoingReferralsPage() {
   }
 
   function getServiceRequest(task: any): any {
-    return task.focus?.reference ? index.get(task.focus.reference) : undefined;
+    if (!task.focus?.reference) return undefined;
+    // Try direct reference lookup, then fullUrl fallback
+    let res = index.get(task.focus.reference);
+    if (!res && task.focus.reference.startsWith("ServiceRequest/")) {
+      const fullUrl = `${task.focus.reference}`;
+      res = index.get(fullUrl);
+    }
+    return res;
   }
 
   function getPatient(task: any): any {
-    return task.for?.reference ? index.get(task.for.reference) : undefined;
+    const ref = task.for?.reference;
+    if (!ref) return undefined;
+    // Try Patient/{id}, fullUrl, and urn:uuid fallback
+    let res = index.get(ref);
+    if (!res) res = index.get(`Patient/${ref}`);
+    return res;
   }
 
   function patientName(task: any): string {
@@ -101,16 +113,37 @@ export default function OutgoingReferralsPage() {
     return p ? humanName(p.name) : task.for?.display || "—";
   }
 
-  if (!ready) return <div className="loading">Loading…</div>;
-  if (!user) return null;
+  function referralId(task: any): string {
+    const sr = getServiceRequest(task);
+    return sr?.identifier?.[0]?.value || sr?.id || task.focus?.reference?.split("/").pop() || task.id || "";
+  }
 
-  if (!practitionerRoleId) {
-    return (
-      <>
-        <AppPageHeader items={[{ label: "Home", href: "/" }, { label: "Requested Referrals" }]} title="Requested Referrals" />
-        <div className="alert err">No practitioner role linked to your account — contact an admin.</div>
-      </>
-    );
+  function getReceivingOrganization(task: any): string {
+    // Use ServiceRequest.performer as primary source (it's the organization)
+    const sr = getServiceRequest(task);
+    if (sr?.performer?.[0]?.reference) {
+      const performer = index.get(sr.performer[0].reference);
+      if (performer?.resourceType === "Organization") {
+        return performer.name || "—";
+      }
+      if (performer?.resourceType === "PractitionerRole" && performer.organization?.reference) {
+        const org = index.get(performer.organization.reference);
+        if (org?.name) return org.name;
+      }
+    }
+    // Fallback to Task.owner
+    const ownerRef = task.owner?.reference;
+    if (ownerRef) {
+      const owner = index.get(ownerRef);
+      if (owner?.resourceType === "Organization") {
+        return owner.name || "—";
+      }
+      if (owner?.resourceType === "PractitionerRole" && owner.organization?.reference) {
+        const org = index.get(owner.organization.reference);
+        if (org?.name) return org.name;
+      }
+    }
+    return "—";
   }
 
   const statusCounts = tasks.reduce<Record<string, number>>((acc, t) => {
@@ -135,25 +168,25 @@ export default function OutgoingReferralsPage() {
     {
       id: "referralId",
       header: "Referral ID",
-      accessorFn: (row: any) => row.identifier?.[0]?.value || row.id || "",
+      accessorFn: (row: any) => referralId(row),
       cell: (info: any) => <code>{info.getValue()}</code>,
     },
     {
       id: "patient",
       header: "Patient",
       accessorFn: (row: any) => patientName(row),
-      cell: (info: any) => info.getValue(),
+      cell: (info: any) => info.getValue() || "—",
     },
     {
-      id: "reason",
-      header: "Reason",
-      accessorFn: (row: any) => srReason(getServiceRequest(row)),
-      cell: (info: any) => info.getValue(),
+      id: "receivingOrg",
+      header: "Organization",
+      accessorFn: (row: any) => getReceivingOrganization(row),
+      cell: (info: any) => info.getValue() || "—",
     },
     {
       id: "priority",
       header: "Priority",
-      accessorFn: (row: any) => row.priority || "",
+      accessorFn: (row: any) => getServiceRequest(row)?.priority || row.priority || "",
       cell: (info: any) => info.getValue() || "—",
     },
     {
@@ -165,10 +198,18 @@ export default function OutgoingReferralsPage() {
     {
       id: "date",
       header: "Date",
-      accessorFn: (row: any) => row.authoredOn ? new Date(row.authoredOn).getTime() : 0,
-      cell: (info: any) => info.row.original.authoredOn ? new Date(info.row.original.authoredOn).toLocaleDateString() : "—",
+      accessorFn: (row: any) => {
+        const sr = getServiceRequest(row);
+        const d = sr?.authoredOn || row.authoredOn || row.meta?.lastUpdated;
+        return d ? new Date(d).getTime() : 0;
+      },
+      cell: (info: any) => {
+        const sr = getServiceRequest(info.row.original);
+        const d = sr?.authoredOn || info.row.original.authoredOn || info.row.original.meta?.lastUpdated;
+        return d ? new Date(d).toLocaleDateString() : "—";
+      },
     },
-  ], []);
+  ], [index]);
 
   const table = useReactTable({
     data: filtered,
@@ -191,6 +232,19 @@ export default function OutgoingReferralsPage() {
   const currentPage = table.getState().pagination.pageIndex + 1;
   const totalPages = Math.max(1, table.getPageCount());
   const pageRows = table.getRowModel().rows;
+
+  // Guards come AFTER all hooks so the hook order stays identical across renders.
+  if (!ready) return <div className="loading">Loading…</div>;
+  if (!user) return null;
+
+  if (!practitionerRoleId) {
+    return (
+      <>
+        <AppPageHeader items={[{ label: "Home", href: "/" }, { label: "Requested Referrals" }]} title="Requested Referrals" />
+        <div className="alert err">No practitioner role linked to your account — contact an admin.</div>
+      </>
+    );
+  }
 
   return (
     <>

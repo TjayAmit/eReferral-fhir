@@ -39,7 +39,6 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch Encounters with service-provider matching the organization
-    // Use _revinclude to fetch ServiceRequests directly with the Encounter
     const bundle = await fhirGet(
       `Encounter?service-provider=Organization/${organization}&_include=Encounter:subject&_revinclude=ServiceRequest:encounter&_sort=-date&_count=100`,
       baseUrl,
@@ -50,7 +49,6 @@ export async function GET(request: NextRequest) {
       all.filter((r: any) => r.resourceType === 'Patient').map((p: any) => [p.id, p]),
     );
 
-    // Group ServiceRequests by encounter
     const serviceRequestsByEncounter = new Map<string, any[]>();
     all.forEach((r: any) => {
       if (r.resourceType === 'ServiceRequest' && r.encounter?.reference) {
@@ -62,12 +60,9 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Clinical Transfer: only show encounters WITH ServiceRequests
     const encounters = all
       .filter((r: any) => r.resourceType === 'Encounter')
-      .filter((enc: any) => {
-        return serviceRequestsByEncounter.has(enc.id);
-      })
+      .filter((enc: any) => serviceRequestsByEncounter.has(enc.id))
       .map((enc: any) => ({
         encounter: enc,
         patient: patients.get(refId(enc.subject?.reference)) || null,

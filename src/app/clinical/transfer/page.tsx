@@ -36,11 +36,6 @@ export default function ClinicalTransferPage() {
   const PAGE_SIZE = 10;
 
   useEffect(() => {
-    // Redirect old route to new route
-    if (typeof window !== "undefined" && window.location.pathname.startsWith("/clinical/waiting")) {
-      router.replace("/clinical/transfer");
-      return;
-    }
     if (ready && user && !canAccess) router.replace("/");
   }, [ready, user, canAccess, router]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 export type System = "doh-lgu" | "clinical" | "ereferral";
 
@@ -47,7 +47,9 @@ export default function SystemSwitcher({
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const justOpenedRef = useRef(false);
 
+  // Close on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -56,28 +58,53 @@ export default function SystemSwitcher({
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
+  // Click outside to close
   useEffect(() => {
     if (!open) return;
+
+    // Prevent the same frame click (e.g. toggle double-click) from immediately closing
+    justOpenedRef.current = true;
+    const rafId = requestAnimationFrame(() => {
+      justOpenedRef.current = false;
+    });
+
     const onClick = (e: MouseEvent) => {
+      if (justOpenedRef.current) return;
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
-    // Delay slightly so the toggle click itself doesn't immediately close the menu
-    const id = setTimeout(() => {
-      document.addEventListener("mousedown", onClick);
-    }, 0);
+
+    document.addEventListener("mousedown", onClick);
     return () => {
-      clearTimeout(id);
+      cancelAnimationFrame(rafId);
       document.removeEventListener("mousedown", onClick);
     };
   }, [open]);
 
   const activeSystem = SYSTEMS.find((s) => s.id === active) ?? SYSTEMS[2];
 
+  const handleToggle = useCallback(() => {
+    setOpen((prev) => !prev);
+  }, []);
+
+  const handleSelect = useCallback(
+    (system: System) => {
+      setOpen(false);
+      onChange(system);
+    },
+    [onChange]
+  );
+
   return (
     <>
-      {open && <div className="system-switcher-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />}
+      {open && (
+        <div
+          className="system-switcher-backdrop"
+          aria-hidden="true"
+          onClick={() => setOpen(false)}
+        />
+      )}
       <div className="system-switcher" ref={containerRef}>
         {open && (
           <div className="system-switcher-menu" onClick={(e) => e.stopPropagation()}>
@@ -86,10 +113,7 @@ export default function SystemSwitcher({
                 key={s.id}
                 type="button"
                 className={active === s.id ? "active" : ""}
-                onClick={() => {
-                  onChange(s.id);
-                  setOpen(false);
-                }}
+                onClick={() => handleSelect(s.id)}
                 aria-pressed={active === s.id}
               >
                 <span className="ic" aria-hidden>{s.icon}</span>
@@ -101,7 +125,7 @@ export default function SystemSwitcher({
         <button
           type="button"
           className="system-switcher-toggle"
-          onClick={() => setOpen(!open)}
+          onClick={handleToggle}
           aria-expanded={open}
           aria-label="Switch system"
         >
