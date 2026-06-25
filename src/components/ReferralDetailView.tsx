@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fhirGet, fhirPost, FhirError } from "@/lib/fhir";
+import { fhirGet, fhirPost, fhirPatch, FhirError } from "@/lib/fhir";
 import { buildNextTask, latestTask, humanName, formatAddress, firstPhone } from "@/lib/referral";
+import { useAuth } from "@/lib/auth";
 import TaskHistory from "./TaskHistory";
 import Modal from "./Modal";
 
@@ -463,6 +464,7 @@ function Section({ title, resource, fhirBadge, count, children }: { title: strin
 export default function ReferralDetailView({
   sr, task: taskProp, onBack, onChanged, showActions = true, showLabUpload = false, showLatestObservations = true, defaultTab = "referral",
 }: { sr: any; task?: any | null; onBack?: () => void; onChanged?: (t: any) => void; showActions?: boolean; showLabUpload?: boolean; showLatestObservations?: boolean; defaultTab?: "referral" | "clinical" }) {
+  const { user } = useAuth();
   const [detail, setDetail] = useState<DetailData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -484,6 +486,15 @@ export default function ReferralDetailView({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [labTitle, setLabTitle] = useState("");
   const [labConclusion, setLabConclusion] = useState("");
+
+  // Patient registration state
+  const [registeringPatient, setRegisteringPatient] = useState(false);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
+  const [selectedPractitioner, setSelectedPractitioner] = useState<any | null>(null);
+  const [practitioners, setPractitioners] = useState<any[]>([]);
+  const [loadingPractitioners, setLoadingPractitioners] = useState(false);
+  const [assignToMe, setAssignToMe] = useState(false);
 
   // Task from detail fetch is fresher (has latest status)
   const activeTask = detail?.task ?? taskProp;
@@ -811,6 +822,78 @@ export default function ReferralDetailView({
     }
   }
 
+  async function fetchPractitioners() {
+    setLoadingPractitioners(true);
+    try {
+      const bundle = await fhirGet("Practitioner?_count=100");
+      setPractitioners((bundle?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Practitioner"));
+    } catch (err) {
+      console.error("Failed to fetch practitioners:", err);
+    } finally {
+      setLoadingPractitioners(false);
+    }
+  }
+
+  function openRegisterModal() {
+    setSelectedPractitioner(null);
+    setAssignToMe(false);
+    setRegisterModalOpen(true);
+    fetchPractitioners();
+  }
+
+  async function handleRegisterPatient() {
+    if (!detail?.patient) return;
+    setRegisteringPatient(true);
+    setRegisterError(null);
+    setNotice(null);
+    try {
+      const patient = detail.patient;
+
+      // Extract PhilHealth and PhilSys identifiers
+      const philhealthId = (patient.identifier || []).find((i: any) => (i.system || "").includes("philhealth-id"))?.value;
+      const philsysId = (patient.identifier || []).find((i: any) => (i.system || "").includes("philsys-id"))?.value;
+
+      const patientData = {
+        resourceType: "Patient",
+        name: patient.name,
+        gender: patient.gender,
+        birthDate: patient.birthDate,
+        telecom: patient.telecom,
+        address: patient.address,
+        identifier: patient.identifier,
+      };
+
+      const res = await fetch("/api/patient", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patientData) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to register patient");
+
+      // Determine practitioner to assign
+      const practitionerToAssign = assignToMe ? user?.practitioner : selectedPractitioner;
+
+      // Update ServiceRequest requester via JSON Patch
+      if (practitionerToAssign && sr?.id) {
+        await fhirPatch("ServiceRequest", sr.id, [
+          {
+            op: "replace",
+            path: "/requester",
+            value: {
+              reference: `Practitioner/${practitionerToAssign.id}`,
+              display: practitionerToAssign.name?.[0]?.text || practitionerToAssign.id
+            }
+          }
+        ]);
+      }
+
+      setRegisterModalOpen(false);
+      setNotice(`Patient registered successfully${philhealthId ? " (PhilHealth: " + philhealthId + ")" : ""}${philsysId ? " (PhilSys: " + philsysId + ")" : ""}${practitionerToAssign ? " and assigned to " + practitionerToAssign.name?.[0]?.text : ""}`);
+      retrieve();
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRegisteringPatient(false);
+    }
+  }
+
   return (
     <>
       <div className="incoming-header" style={{ padding: "16px 22px", marginBottom: 16 }}>
@@ -829,6 +912,15 @@ export default function ReferralDetailView({
             <span className={`badge ${status}`} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999 }}>{status}</span>
           </div>
           <div className="incoming-header-actions">
+            {(status === "accepted" || status === "completed") && !sr?.requester?.reference?.includes("Practitioner") && (
+              <button
+                className="action-primary"
+                onClick={openRegisterModal}
+                disabled={registeringPatient}
+              >
+                {registeringPatient ? "Adding…" : "Add to Patient Registry"}
+              </button>
+            )}
             {showLabUpload && (
               <button
                 className="action-primary"
@@ -854,6 +946,8 @@ export default function ReferralDetailView({
           </div>
         </div>
       </div>
+
+      {registerError && <div className="alert err" style={{ margin: "0 22px 16px" }}>❌ {registerError}</div>}
 
       <Modal
         isOpen={noteModalOpen}
@@ -974,6 +1068,189 @@ export default function ReferralDetailView({
                 disabled={uploading || !selectedFile}
               >
                 {uploading ? "Uploading..." : "Upload"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Patient Registration Modal */}
+      {registerModalOpen && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.6)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+          padding: 16,
+        }}>
+          <div style={{
+            background: "white",
+            padding: 32,
+            borderRadius: 12,
+            maxWidth: 480,
+            width: "100%",
+            maxHeight: "90vh",
+            overflowY: "auto",
+            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#111827" }}>Save Patient to EMR</h2>
+              <button
+                onClick={() => setRegisterModalOpen(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 24,
+                  color: "#6b7280",
+                  cursor: "pointer",
+                  padding: 4,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <p className="muted" style={{ marginBottom: 24, lineHeight: 1.5, color: "#6b7280" }}>
+              Register the patient to your system and assign a physician to review this referral.
+            </p>
+
+            <div style={{ marginBottom: 24 }}>
+              <label style={{
+                display: "flex",
+                alignItems: "center",
+                padding: 12,
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                cursor: "pointer",
+                transition: "all 0.2s",
+                backgroundColor: assignToMe ? "#f0fdf4" : "white",
+                borderColor: assignToMe ? "#22c55e" : "#e5e7eb",
+              }}>
+                <input
+                  type="checkbox"
+                  checked={assignToMe}
+                  onChange={(e) => {
+                    setAssignToMe(e.target.checked);
+                    if (e.target.checked) {
+                      setSelectedPractitioner(user?.practitioner || null);
+                    } else {
+                      setSelectedPractitioner(null);
+                    }
+                  }}
+                  style={{ marginRight: 12, width: 18, height: 18, cursor: "pointer" }}
+                />
+                <span style={{ fontSize: 15, fontWeight: 500, color: "#374151" }}>
+                  Assign to me
+                </span>
+              </label>
+            </div>
+
+            {!assignToMe && (
+              <div style={{ marginBottom: 24 }}>
+                <label htmlFor="practitioner-select" style={{
+                  display: "block",
+                  marginBottom: 8,
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "#374151",
+                }}>
+                  Assign Physician
+                </label>
+                {loadingPractitioners ? (
+                  <div style={{
+                    padding: 12,
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    backgroundColor: "#f9fafb",
+                    color: "#6b7280",
+                    fontSize: 14,
+                  }}>
+                    Loading physicians...
+                  </div>
+                ) : (
+                  <select
+                    id="practitioner-select"
+                    value={selectedPractitioner?.id || ""}
+                    onChange={(e) => {
+                      const practitioner = practitioners.find((p: any) => p.id === e.target.value);
+                      setSelectedPractitioner(practitioner || null);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: 12,
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                      fontSize: 15,
+                      backgroundColor: "white",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <option value="">-- Select Physician --</option>
+                    {practitioners.map((p: any) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name?.[0]?.text || p.id}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+
+            {registerError && (
+              <div style={{
+                marginBottom: 24,
+                padding: 12,
+                backgroundColor: "#fef2f2",
+                border: "1px solid #fecaca",
+                borderRadius: 8,
+                color: "#dc2626",
+                fontSize: 14,
+              }}>
+                ❌ {registerError}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", paddingTop: 16, borderTop: "1px solid #e5e7eb" }}>
+              <button
+                onClick={() => setRegisterModalOpen(false)}
+                disabled={registeringPatient}
+                style={{
+                  padding: "10px 20px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: 8,
+                  backgroundColor: "white",
+                  color: "#374151",
+                  fontSize: 15,
+                  fontWeight: 500,
+                  cursor: registeringPatient ? "not-allowed" : "pointer",
+                  opacity: registeringPatient ? 0.5 : 1,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRegisterPatient}
+                disabled={registeringPatient}
+                style={{
+                  padding: "10px 20px",
+                  border: "none",
+                  borderRadius: 8,
+                  backgroundColor: "#2563eb",
+                  color: "white",
+                  fontSize: 15,
+                  fontWeight: 500,
+                  cursor: registeringPatient ? "not-allowed" : "pointer",
+                  opacity: registeringPatient ? 0.7 : 1,
+                }}
+              >
+                {registeringPatient ? "Adding..." : "Add & Assign"}
               </button>
             </div>
           </div>

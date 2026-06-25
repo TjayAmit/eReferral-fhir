@@ -78,11 +78,12 @@ export async function GET(request: NextRequest) {
 
     // ── VIEW a single encounter ─────────────────────────────────────────
     if (encounter) {
-      const [encBundle, condBundle, procBundle, drBundle] = await Promise.all([
+      const [encBundle, condBundle, procBundle, drBundle, taskBundle] = await Promise.all([
         fhirGet(`Encounter?_id=${encounter}&_include=Encounter:subject&_revinclude=Observation:encounter`, baseUrl),
         fhirGet(`Condition?encounter=Encounter/${encounter}&_count=50`, baseUrl),
         fhirGet(`Procedure?encounter=Encounter/${encounter}&_count=50`, baseUrl),
         fhirGet(`DiagnosticReport?encounter=Encounter/${encounter}&_count=50`, baseUrl),
+        fhirGet(`Task?encounter=Encounter/${encounter}&_count=50`, baseUrl),
       ]);
       const all = collect(encBundle);
       return NextResponse.json({
@@ -92,6 +93,7 @@ export async function GET(request: NextRequest) {
         conditions: collect(condBundle),
         procedures: collect(procBundle),
         diagnosticReports: collect(drBundle),
+        tasks: collect(taskBundle),
       });
     }
 

@@ -18,6 +18,7 @@ type Detail = {
   conditions: any[];
   procedures: any[];
   diagnosticReports?: any[];
+  tasks?: any[];
 };
 
 const idVal = (res: any, kind: string) =>
@@ -73,6 +74,8 @@ export default function ClinicalUpdateViewPage() {
   const [disposing, setDisposing] = useState<string | null>(null);
   const [dispError, setDispError] = useState<string | null>(null);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [registeringPatient, setRegisteringPatient] = useState(false);
+  const [registerError, setRegisterError] = useState<string | null>(null);
   const [existingIds, setExistingIds] = useState({
     chiefConditionId: "",
     dxConditionId: "",
@@ -188,6 +191,43 @@ export default function ClinicalUpdateViewPage() {
     }
   }
 
+  // Register patient from incoming referral
+  async function handleRegisterPatient() {
+    if (!detail?.patient) return;
+    setRegisteringPatient(true);
+    setRegisterError(null);
+    setNotice(null);
+    try {
+      const hdrs = { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl };
+      const patient = detail.patient;
+
+      // Extract PhilHealth and PhilSys identifiers
+      const philhealthId = idVal(patient, "philhealth-id");
+      const philsysId = idVal(patient, "philsys-id");
+
+      const patientData = {
+        resourceType: "Patient",
+        name: patient.name,
+        gender: patient.gender,
+        birthDate: patient.birthDate,
+        telecom: patient.telecom,
+        address: patient.address,
+        identifier: patient.identifier,
+      };
+
+      const res = await fetch("/api/patient", { method: "POST", headers: hdrs, body: JSON.stringify(patientData) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to register patient");
+
+      setNotice(`Patient registered successfully${philhealthId ? " (PhilHealth: " + philhealthId + ")" : ""}${philsysId ? " (PhilSys: " + philsysId + ")" : ""}`);
+      load();
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRegisteringPatient(false);
+    }
+  }
+
   // Step 3/4 — finalize the encounter per the doctor's disposition choice.
   async function handleDisposition(choice: Disposition, transferPayload?: TransferPayload) {
     if (!detail?.encounter || !detail?.patient?.id) return;
@@ -264,7 +304,7 @@ export default function ClinicalUpdateViewPage() {
       load();
     } catch (err) {
       setDispError(err instanceof Error ? err.message : String(err));
-    } finally {
+    } finally { 
       setDisposing(null);
     }
   }
@@ -282,6 +322,9 @@ export default function ClinicalUpdateViewPage() {
 
   // Clinical data already recorded on this encounter?
   const hasClinicalData = (detail?.conditions?.length || 0) > 0 || (detail?.procedures?.length || 0) > 0;
+
+  // Check if there's a task with status = "accepted" or "completed"
+  const hasAcceptedTask = (detail?.tasks || []).some((t: any) => t.status === "accepted" || t.status === "completed");
 
   return (
     <>
@@ -311,6 +354,26 @@ export default function ClinicalUpdateViewPage() {
           <div>
             {notice && <div className="alert ok">✅ {notice}</div>}
             {saveError && <div className="alert err">❌ {saveError}</div>}
+            {registerError && <div className="alert err">❌ {registerError}</div>}
+
+            {hasAcceptedTask && (
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div className="section-header">
+                  <div className="section-title-wrap"><span className="section-indicator" /><h2 className="section-title">Incoming Referral</h2></div>
+                  <span className="badge accepted">Accepted</span>
+                </div>
+                <p className="muted" style={{ marginTop: -4, marginBottom: 10 }}>
+                  This encounter has an accepted incoming referral. Register the patient data to your system.
+                </p>
+                <button
+                  className="action-primary"
+                  onClick={handleRegisterPatient}
+                  disabled={registeringPatient}
+                >
+                  {registeringPatient ? "Adding…" : "Add to Patient Registry"}
+                </button>
+              </div>
+            )}
 
             {!isEditing && hasClinicalData ? (
               <>
