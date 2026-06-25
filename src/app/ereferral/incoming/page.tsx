@@ -18,7 +18,7 @@ import {
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
-type ReferralItem = { sr: any; task: any | null; patient: any | null; orgById: Map<string, any>; roleById: Map<string, any> };
+type ReferralItem = { sr: any; task: any | null; patient: any | null; orgById: Map<string, any>; roleById: Map<string, any>; diagnosticReports: any[] };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -87,6 +87,45 @@ export default function IncomingReferralsPage() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const PAGE_SIZE = 10;
 
+  // Lab viewing modal state
+  const [viewLabModalOpen, setViewLabModalOpen] = useState(false);
+  const [selectedReports, setSelectedReports] = useState<any[]>([]);
+
+  function openViewLabModal(item: ReferralItem) {
+    setSelectedReports(item.diagnosticReports);
+    setViewLabModalOpen(true);
+  }
+
+  function downloadLabReport(dr: any) {
+    const fileData = dr.presentedForm?.[0]?.data;
+    const fileName = dr.presentedForm?.[0]?.title || "lab-report";
+    const contentType = dr.presentedForm?.[0]?.contentType || "application/pdf";
+
+    if (!fileData) {
+      alert("No file data available for this report");
+      return;
+    }
+
+    // Convert base64 to blob
+    const byteCharacters = atob(fileData);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: contentType });
+
+    // Create download link
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   useEffect(() => {
     if (ready && !user) router.replace("/login");
   }, [ready, user, router]);
@@ -103,7 +142,7 @@ export default function IncomingReferralsPage() {
     setLoading(true); setError(null);
     try {
       const bundle = await fhirGet(
-        `ServiceRequest?performer=Organization/${orgId}&_include=ServiceRequest:subject&_include=ServiceRequest:requester&_revinclude=Task:focus&_sort=-authored&_count=100`
+        `ServiceRequest?performer=Organization/${orgId}&_include=ServiceRequest:subject&_include=ServiceRequest:requester&_revinclude=Task:focus&_revinclude=DiagnosticReport:subject&_sort=-authored&_count=100`
       );
 
       const all = dedupeResources(bundle);
@@ -127,13 +166,27 @@ export default function IncomingReferralsPage() {
         }
       }
 
-      setItems(srs.map((sr) => ({
-        sr,
-        task:    latestTask(tasksBySrId.get(sr.id) || []) || null,
-        patient: patientById.get(refId(sr.subject?.reference || "")) || null,
-        orgById,
-        roleById,
-      })));
+      // Group DiagnosticReports by encounter
+      const diagnosticReportsByEncounter = new Map<string, any[]>();
+      for (const dr of all.filter((r) => r.resourceType === "DiagnosticReport")) {
+        const encounterId = refId(dr.encounter?.reference || "");
+        if (encounterId) {
+          if (!diagnosticReportsByEncounter.has(encounterId)) diagnosticReportsByEncounter.set(encounterId, []);
+          diagnosticReportsByEncounter.get(encounterId)!.push(dr);
+        }
+      }
+
+      setItems(srs.map((sr) => {
+        const encounterId = refId(sr.encounter?.reference || "");
+        return {
+          sr,
+          task:    latestTask(tasksBySrId.get(sr.id) || []) || null,
+          patient: patientById.get(refId(sr.subject?.reference || "")) || null,
+          orgById,
+          roleById,
+          diagnosticReports: encounterId ? (diagnosticReportsByEncounter.get(encounterId) || []) : [],
+        };
+      }));
     } catch (e) {
       setError(e instanceof FhirError ? e.message : String(e));
     } finally { setLoading(false); }
@@ -158,12 +211,6 @@ export default function IncomingReferralsPage() {
   });
 
   const columns = useMemo(() => [
-    {
-      id: "referralId",
-      header: "Referral ID",
-      accessorFn: (row: ReferralItem) => row.sr.identifier?.[0]?.value || row.sr.id || "",
-      cell: (info: any) => <code>{info.getValue()}</code>,
-    },
     {
       id: "patient",
       header: "Patient",
@@ -337,6 +384,85 @@ export default function IncomingReferralsPage() {
           </>
         )}
       </div>
+
+      {/* Lab Viewing Modal */}
+      {viewLabModalOpen && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+        }}>
+          <div style={{
+            background: "white",
+            padding: 24,
+            borderRadius: 8,
+            maxWidth: 600,
+            width: "90%",
+            maxHeight: "90vh",
+            overflowY: "auto",
+          }}>
+            <h2 style={{ marginTop: 0, marginBottom: 16 }}>Lab Reports</h2>
+            <p className="muted" style={{ marginBottom: 16 }}>
+              Laboratory reports associated with this referral.
+            </p>
+
+            {selectedReports.length === 0 ? (
+              <p className="muted">No lab reports available.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {selectedReports.map((dr, idx) => (
+                  <div
+                    key={dr.id || idx}
+                    style={{
+                      padding: 12,
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 4,
+                      backgroundColor: "#f9fafb"
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
+                      <div>
+                        <strong>{dr.presentedForm?.[0]?.title || dr.code?.coding?.[0]?.display || "Lab Report"}</strong>
+                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                          {dr.conclusion || "No conclusion provided"}
+                        </div>
+                      </div>
+                      <button
+                        className="action-primary"
+                        style={{ padding: "4px 8px", fontSize: 12 }}
+                        onClick={() => downloadLabReport(dr)}
+                      >
+                        Download
+                      </button>
+                    </div>
+                    {dr.code?.coding?.[0] && (
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>
+                        Code: {dr.code.coding[0].code} - {dr.code.coding[0].display}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+              <button
+                className="ghost"
+                onClick={() => setViewLabModalOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

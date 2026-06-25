@@ -166,12 +166,6 @@ export default function OutgoingReferralsPage() {
 
   const columns = useMemo(() => [
     {
-      id: "referralId",
-      header: "Referral ID",
-      accessorFn: (row: any) => referralId(row),
-      cell: (info: any) => <code>{info.getValue()}</code>,
-    },
-    {
       id: "patient",
       header: "Patient",
       accessorFn: (row: any) => patientName(row),
@@ -179,7 +173,7 @@ export default function OutgoingReferralsPage() {
     },
     {
       id: "receivingOrg",
-      header: "Organization",
+      header: "To",
       accessorFn: (row: any) => getReceivingOrganization(row),
       cell: (info: any) => info.getValue() || "—",
     },

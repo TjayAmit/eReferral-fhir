@@ -220,7 +220,10 @@ export default function ClinicalUpdateViewPage() {
       // Transfer: create a draft ServiceRequest linked to the encounter + patient.
       let serviceRequestId = "";
       if (choice === "transfer" && transferPayload) {
-        const requisitionValue = `TRANSFER-${detail.encounter.id}-${Date.now()}`;
+        const orgId = user?.organization?.id || "UNKNOWN";
+        const year = new Date().getFullYear();
+        const uniqueValue = Date.now();
+        const requisitionValue = `ORG-${orgId}-${year}-${uniqueValue}`;
         const patientName = detail.patient.name?.[0]?.text || detail.patient.name?.[0]?.family || "Patient";
         const transferNote = note || "Patient transfer to another facility";
         const sr = {

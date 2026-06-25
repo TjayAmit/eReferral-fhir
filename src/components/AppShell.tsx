@@ -279,7 +279,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={`${section.group || "clinical"}-${n.label}-${n.href}`}
                   href={n.href}
-                  className={n.label === "Overview" || isActive(n.href, pathname) ? "active" : ""}
+                  className={isActive(n.href, pathname) ? "active" : ""}
                 >
                   <span className="ic" aria-hidden>{n.icon}</span>
                   <span>{n.label}</span>

@@ -67,6 +67,8 @@ export default function ReferralDetailPage() {
           sr={sr}
           onBack={() => router.push("/ereferral/outgoing")}
           showActions={false}
+          showLabUpload={true}
+          showLatestObservations={true}
         />
       )}
     </>

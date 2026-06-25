@@ -130,6 +130,10 @@ function PatientCard({ patient }: { patient: any }) {
 
       <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
         <div style={{ display: "flex", gap: 8 }}>
+          <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>Patient ID</span>
+          <code style={{ fontSize: 13, color: "#111827" }}>{patient?.id || "—"}</code>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
           <span style={{ color: "#6b7280", fontSize: 12, minWidth: 80, fontWeight: 500 }}>PhilHealth</span>
           <span style={{ fontSize: 13, color: "#111827" }}>{philhealth || "Not provided"}</span>
         </div>
@@ -162,7 +166,7 @@ type VitalItem = {
   colorClass: string;
 };
 
-function VitalsPanel({ observations }: { observations: any[] }) {
+function VitalsPanel({ observations, showLatest = true }: { observations: any[]; showLatest?: boolean }) {
   const LOINC_NAMES: Record<string, { name: string; icon: React.ReactNode; color: string }> = {
     "8867-4": { name: "Heart Rate", icon: <IconHeart />, color: "vital-rose" },
     "8310-5": { name: "Temperature", icon: <IconThermometer />, color: "vital-amber" },
@@ -241,25 +245,29 @@ function VitalsPanel({ observations }: { observations: any[] }) {
     return `${m}/${day}/${y} · ${h12}:${minutes} ${ampm}`;
   }
 
-  // Group observations by date (day-level) and keep only the latest group
+  // Group observations by date (day-level) and keep only the latest group if showLatest is true
   function dateKey(o: any): string {
     const d = o.effectiveDateTime ? new Date(o.effectiveDateTime) : o.issued ? new Date(o.issued) : null;
     if (!d) return "";
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
-  const grouped = new Map<string, any[]>();
-  for (const o of observations) {
-    const k = dateKey(o);
-    if (!grouped.has(k)) grouped.set(k, []);
-    grouped.get(k)!.push(o);
+
+  let displayObs = observations;
+  if (showLatest) {
+    const grouped = new Map<string, any[]>();
+    for (const o of observations) {
+      const k = dateKey(o);
+      if (!grouped.has(k)) grouped.set(k, []);
+      grouped.get(k)!.push(o);
+    }
+    const latestDate = Array.from(grouped.keys()).sort().pop() || "";
+    displayObs = latestDate ? grouped.get(latestDate)! : observations;
   }
-  const latestDate = Array.from(grouped.keys()).sort().pop() || "";
-  const latestObs = latestDate ? grouped.get(latestDate)! : observations;
 
   const known: VitalItem[] = [];
   const others: any[] = [];
 
-  for (const o of latestObs) {
+  for (const o of displayObs) {
     const code = getCode(o);
     const isBP = code === "8480-6" || code === "8462-4" || code === "85354-9" || hasBPComponent(o);
     if (isBP || !code) {
@@ -453,17 +461,29 @@ function Section({ title, resource, fhirBadge, count, children }: { title: strin
 // ── Referral detail view ────────────────────────────────────────────────────
 
 export default function ReferralDetailView({
-  sr, task: taskProp, onBack, onChanged, showActions = true, defaultTab = "referral",
-}: { sr: any; task?: any | null; onBack?: () => void; onChanged?: (t: any) => void; showActions?: boolean; defaultTab?: "referral" | "clinical" }) {
+  sr, task: taskProp, onBack, onChanged, showActions = true, showLabUpload = false, showLatestObservations = true, defaultTab = "referral",
+}: { sr: any; task?: any | null; onBack?: () => void; onChanged?: (t: any) => void; showActions?: boolean; showLabUpload?: boolean; showLatestObservations?: boolean; defaultTab?: "referral" | "clinical" }) {
   const [detail, setDetail] = useState<DetailData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"referral" | "clinical">(defaultTab);
+
+  // Labs fetched asynchronously so main render isn't blocked
+  const [labs, setLabs] = useState<any[]>([]);
+  const [labsLoading, setLabsLoading] = useState(false);
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+
+  // Lab upload modal state
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [labTitle, setLabTitle] = useState("");
+  const [labConclusion, setLabConclusion] = useState("");
 
   // Task from detail fetch is fresher (has latest status)
   const activeTask = detail?.task ?? taskProp;
@@ -572,37 +592,32 @@ export default function ReferralDetailView({
       let observations: any[] = [];
       let conditions: any[] = [];
       let procedures: any[] = [];
-      let diagnosticReports: any[] = [];
       if (encounterId) {
         const enc = `Encounter/${encounterId}`;
-        const [obsB, condB, procB, drB] = await Promise.all([
+        const [obsB, condB, procB] = await Promise.all([
           fhirGet(`Observation?encounter=${enc}&_count=100`),
           fhirGet(`Condition?encounter=${enc}&_count=100`),
           fhirGet(`Procedure?encounter=${enc}&_count=100`),
-          fhirGet(`DiagnosticReport?encounter=${enc}&_count=100`),
         ]);
         observations = (obsB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Observation");
         conditions = (condB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Condition");
         procedures = (procB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Procedure");
-        diagnosticReports = (drB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "DiagnosticReport");
       }
 
       // Fallback: older referrals whose clinical resources aren't linked to an
       // Encounter — fetch by Patient subject so the view still renders.
       const nothingFromEncounter =
-        observations.length + conditions.length + procedures.length + diagnosticReports.length === 0;
+        observations.length + conditions.length + procedures.length === 0;
       if (patient && (!encounterId || nothingFromEncounter)) {
         const subj = `Patient/${patient.id}`;
-        const [obsB, condB, procB, drB] = await Promise.all([
+        const [obsB, condB, procB] = await Promise.all([
           fhirGet(`Observation?subject=${subj}&_count=100`),
           fhirGet(`Condition?subject=${subj}&_count=100`),
           fhirGet(`Procedure?subject=${subj}&_count=100`),
-          fhirGet(`DiagnosticReport?subject=${subj}&_count=100`),
         ]);
         if (observations.length === 0) observations = (obsB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Observation");
         if (conditions.length === 0) conditions = (condB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Condition");
         if (procedures.length === 0) procedures = (procB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "Procedure");
-        if (diagnosticReports.length === 0) diagnosticReports = (drB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "DiagnosticReport");
       }
 
       // Receiving side: ServiceRequest.performer = Organization only;
@@ -651,7 +666,7 @@ export default function ReferralDetailView({
         observations,
         conditions,
         procedures,
-        diagnosticReports,
+        diagnosticReports: [], // populated asynchronously via fetchLabs
       };
       setDetail(detailData);
     } catch (e) {
@@ -661,6 +676,28 @@ export default function ReferralDetailView({
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { retrieve(); }, [sr?.id]);
+
+  // Fetch labs asynchronously after patient is known so main render isn't blocked
+  useEffect(() => {
+    const patientId = detail?.patient?.id;
+    if (!patientId) return;
+    let cancelled = false;
+    async function fetchLabs() {
+      setLabsLoading(true);
+      try {
+        const drB = await fhirGet(`DiagnosticReport?subject=Patient/${patientId}&_count=100`);
+        if (!cancelled) {
+          setLabs((drB?.entry || []).map((e: any) => e.resource).filter((r: any) => r?.resourceType === "DiagnosticReport"));
+        }
+      } catch {
+        /* ignore lab fetch errors */
+      } finally {
+        if (!cancelled) setLabsLoading(false);
+      }
+    }
+    fetchLabs();
+    return () => { cancelled = true; };
+  }, [detail?.patient?.id]);
 
   function openNoteModal(s: string) {
     setPendingAction(s);
@@ -703,6 +740,77 @@ export default function ReferralDetailView({
     } finally { setBusy(null); }
   }
 
+  function openUploadModal() {
+    setSelectedFile(null);
+    setLabTitle("");
+    setLabConclusion("");
+    setUploadError(null);
+    setUploadModalOpen(true);
+  }
+
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(",")[1];
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  }
+
+  async function handleFileUpload() {
+    if (!selectedFile || !detail?.patient) {
+      setUploadError("Please select a file to upload");
+      return;
+    }
+
+    const encounterId = detail?.encounter?.id || "";
+
+    setUploading(true);
+    setUploadError(null);
+
+    try {
+      const base64Data = await fileToBase64(selectedFile);
+
+      const response = await fetch("/api/diagnostic-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          encounterId,
+          patientId: detail.patient.id,
+          fileName: selectedFile.name,
+          fileType: selectedFile.type,
+          fileData: base64Data,
+          title: labTitle || selectedFile.name,
+          conclusion: labConclusion,
+          code: "24356-8",
+          codeSystem: "http://loinc.org",
+          codeDisplay: "Urinalysis complete panel - Urine"
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to upload lab report");
+      }
+
+      setUploadModalOpen(false);
+      setSelectedFile(null);
+      setLabTitle("");
+      setLabConclusion("");
+      setNotice("Lab report uploaded successfully");
+      retrieve();
+    } catch (error: any) {
+      setUploadError(error.message || "Failed to upload lab report");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <>
       <div className="incoming-header" style={{ padding: "16px 22px", marginBottom: 16 }}>
@@ -721,6 +829,15 @@ export default function ReferralDetailView({
             <span className={`badge ${status}`} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999 }}>{status}</span>
           </div>
           <div className="incoming-header-actions">
+            {showLabUpload && (
+              <button
+                className="action-primary"
+                onClick={openUploadModal}
+                disabled={uploading}
+              >
+                Upload Lab
+              </button>
+            )}
             {showActions && activeTask && actions.map((a) => (
               <button
                 key={a.status}
@@ -770,6 +887,98 @@ export default function ReferralDetailView({
           </button>
         </div>
       </Modal>
+
+      {/* Lab Upload Modal */}
+      {uploadModalOpen && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+        }}>
+          <div style={{
+            background: "white",
+            padding: 24,
+            borderRadius: 8,
+            maxWidth: 500,
+            width: "90%",
+            maxHeight: "90vh",
+            overflowY: "auto",
+          }}>
+            <h2 style={{ marginTop: 0, marginBottom: 16 }}>Upload Lab Report</h2>
+            <p className="muted" style={{ marginBottom: 16 }}>
+              Upload a laboratory report for this referral. The file will be encoded and stored as a DiagnosticReport.
+            </p>
+
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label htmlFor="lab-file">Lab File</label>
+              <input
+                id="lab-file"
+                type="file"
+                accept=".pdf,.png,.txt"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                style={{ width: "100%", padding: 8, border: "1px solid #e5e7eb", borderRadius: 4 }}
+              />
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Accepted formats: PDF, PNG, TXT
+              </p>
+            </div>
+
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label htmlFor="lab-title">Report Title</label>
+              <input
+                id="lab-title"
+                type="text"
+                value={labTitle}
+                onChange={(e) => setLabTitle(e.target.value)}
+                placeholder="e.g., Urinalysis Results"
+                style={{ width: "100%", padding: 8, border: "1px solid #e5e7eb", borderRadius: 4 }}
+              />
+            </div>
+
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label htmlFor="lab-conclusion">Conclusion/Findings</label>
+              <textarea
+                id="lab-conclusion"
+                rows={3}
+                value={labConclusion}
+                onChange={(e) => setLabConclusion(e.target.value)}
+                placeholder="Enter lab findings or conclusion..."
+                style={{ width: "100%", padding: 8, border: "1px solid #e5e7eb", borderRadius: 4, resize: "vertical" }}
+              />
+            </div>
+
+            {uploadError && (
+              <div className="alert err" style={{ marginBottom: 16 }}>
+                ❌ {uploadError}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                className="ghost"
+                onClick={() => setUploadModalOpen(false)}
+                disabled={uploading}
+              >
+                Cancel
+              </button>
+              <button
+                className="action-primary"
+                onClick={handleFileUpload}
+                disabled={uploading || !selectedFile}
+              >
+                {uploading ? "Uploading..." : "Upload"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {notice && <div className="alert ok">✅ {notice}</div>}
       {error && <div className="alert err">❌ {error}</div>}
@@ -917,7 +1126,7 @@ export default function ReferralDetailView({
                   {/* Observations / Vitals */}
                   <Section title="Vitals & Observations" fhirBadge="Observation" count={detail.observations.length}>
                     {detail.observations.length > 0
-                      ? <VitalsPanel observations={detail.observations} />
+                      ? <VitalsPanel observations={detail.observations} showLatest={showLatestObservations} />
                       : <p className="muted">No vital signs or observations recorded.</p>}
                   </Section>
 
@@ -951,21 +1160,148 @@ export default function ReferralDetailView({
                   )}
 
                   {/* Diagnostic Reports */}
-                  <Section title={`Diagnostic Reports / Lab Results (${detail.diagnosticReports.length})`} resource="DiagnosticReport">
-                    {detail.diagnosticReports.length > 0 ? detail.diagnosticReports.map((dr, idx) => (
-                        <div key={dr.id || idx} style={{ marginBottom: idx < detail.diagnosticReports.length - 1 ? 12 : 0, paddingBottom: idx < detail.diagnosticReports.length - 1 ? 12 : 0, borderBottom: idx < detail.diagnosticReports.length - 1 ? "1px solid #e0e0e0" : "none" }}>
-                          <dl className="kv">
-                            <dt>Code</dt>
-                            <dd>{dr.code?.coding?.[0]?.display || dr.code?.text || "—"}</dd>
-                            <dt>Status</dt>
-                            <dd>{dr.status || "—"}</dd>
-                            <dt>Title</dt>
-                            <dd>{dr.presentedForm?.[0]?.title || "—"}</dd>
-                            <dt>Conclusion</dt>
-                            <dd>{dr.conclusion || "—"}</dd>
-                          </dl>
-                        </div>
-                      )) : <p className="muted">No diagnostic reports / lab results recorded.</p>}
+                  <Section title={`Diagnostic Reports / Lab Results (${labs.length})`} resource="DiagnosticReport">
+                    {labsLoading ? (
+                      <p className="muted">Loading lab results…</p>
+                    ) : labs.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {labs.map((dr) => {
+                          const form = dr.presentedForm?.[0];
+                          const fileName = form?.title || dr.code?.text || `Lab-${dr.id}.pdf`;
+                          const hasFile = form?.url?.startsWith("data:");
+                          return (
+                            <div
+                              key={dr.id}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 12,
+                                padding: "10px 12px",
+                                background: "#f9fafb",
+                                borderRadius: 6,
+                                border: "1px solid #e5e7eb",
+                                transition: "all 0.15s ease",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "#f3f4f6";
+                                e.currentTarget.style.borderColor = "#d1d5db";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "#f9fafb";
+                                e.currentTarget.style.borderColor = "#e5e7eb";
+                              }}
+                            >
+                              {/* PDF Icon */}
+                              <svg
+                                width="24"
+                                height="24"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#dc2626"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                style={{ flexShrink: 0 }}
+                              >
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <path d="M12 18v-6" />
+                                <path d="M9 15l3 3 3-3" />
+                              </svg>
+
+                              {/* File Name */}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                {hasFile ? (
+                                  <a
+                                    href={form.url}
+                                    download={fileName}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      color: "#111827",
+                                      fontSize: 14,
+                                      fontWeight: 500,
+                                      textDecoration: "none",
+                                      display: "block",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.textDecoration = "underline";
+                                      e.currentTarget.style.color = "#2563eb";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.textDecoration = "none";
+                                      e.currentTarget.style.color = "#111827";
+                                    }}
+                                  >
+                                    {fileName}
+                                  </a>
+                                ) : (
+                                  <span
+                                    style={{
+                                      color: "#6b7280",
+                                      fontSize: 14,
+                                      display: "block",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {fileName}
+                                  </span>
+                                )}
+                                {dr.conclusion && (
+                                  <p
+                                    style={{
+                                      color: "#6b7280",
+                                      fontSize: 12,
+                                      margin: "2px 0 0 0",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {dr.conclusion}
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Download indicator */}
+                              {hasFile && (
+                                <a
+                                  href={form.url}
+                                  download={fileName}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{ flexShrink: 0, display: "inline-flex", color: "#6b7280" }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.color = "#2563eb"; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.color = "#6b7280"; }}
+                                >
+                                  <svg
+                                    width="16"
+                                    height="16"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                  </svg>
+                                </a>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="muted">No diagnostic reports / lab results recorded.</p>
+                    )}
                   </Section>
                 </>
               )}
@@ -983,6 +1319,8 @@ export default function ReferralDetailView({
               {detail.encounter && (
                 <Section title="Encounter" resource="Encounter">
                   <dl className="kv">
+                    <dt>ID</dt>
+                    <dd><code>{detail.encounter.id || "—"}</code></dd>
                     <dt>Status</dt>
                     <dd>{detail.encounter.status || "—"}</dd>
                     <dt>Class</dt>
