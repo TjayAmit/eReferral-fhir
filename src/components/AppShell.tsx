@@ -274,7 +274,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="layout">
       <aside className="sidebar">
         <div className="side-brand">
-          <div>Z.C - eReferral</div>
+          <div>
+            {activeSystem === "clinical"
+              ? "Z.C - EMR"
+              : activeSystem === "doh-lgu"
+                ? "Z.C - DOH"
+                : "Z.C - eReferral"}
+          </div>
           <span>Zamboanga City Medical Center</span>
         </div>
 
