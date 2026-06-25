@@ -40,24 +40,37 @@ function dedupeResources(bundle: any): any[] {
   return out;
 }
 
-function getRequestingOrganization(item: ReferralItem): string {
+function getPerformerOrganization(item: ReferralItem): string {
   const { sr, orgById, roleById } = item;
-  const requesterRef = sr.requester?.reference;
-  if (!requesterRef) return "—";
+  const performerRef = sr.performer?.[0]?.reference;
+  if (!performerRef) return "—";
 
-  if (requesterRef.includes("Organization/")) {
-    const orgId = refId(requesterRef);
+  if (performerRef.includes("Organization/")) {
+    const orgId = refId(performerRef);
     const org = orgById.get(orgId);
     if (org?.name) return org.name;
   }
 
-  if (requesterRef.includes("PractitionerRole/")) {
-    const roleId = refId(requesterRef);
+  if (performerRef.includes("PractitionerRole/")) {
+    const roleId = refId(performerRef);
     const role = roleById.get(roleId);
     if (role?.organization?.reference) {
       const orgId = refId(role.organization.reference);
       const org = orgById.get(orgId);
       if (org?.name) return org.name;
+    }
+  }
+
+  // When performer is a Practitioner, look up their PractitionerRole(s)
+  // and return the first role's organization name.
+  if (performerRef.includes("Practitioner/")) {
+    const practId = refId(performerRef);
+    for (const role of roleById.values()) {
+      if (refId(role.practitioner?.reference || "") === practId && role.organization?.reference) {
+        const orgId = refId(role.organization.reference);
+        const org = orgById.get(orgId);
+        if (org?.name) return org.name;
+      }
     }
   }
 
@@ -91,61 +104,77 @@ export default function MyAssignedReferralsPage() {
   }, [ready, user, router]);
 
   useEffect(() => {
-    if (ready && orgId && practitionerId) load();
-  }, [ready, orgId, practitionerId]);
+    if (ready && practitionerId) load();
+  }, [ready, practitionerId]);
 
   useEffect(() => { setPage(1); }, [query, statusFilter]);
   useEffect(() => { setPage(1); }, [sorting]);
 
   async function load() {
-    if (!orgId || !practitionerId) return;
+    if (!practitionerId) return;
     setLoading(true); setError(null);
     try {
-      const bundle = await fhirGet(
-        `ServiceRequest?performer=Organization/${orgId}&requester=Practitioner/${practitionerId}&_include=ServiceRequest:subject&_include=ServiceRequest:requester&_include=ServiceRequest:performer&_include=ServiceRequest:encounter&_include:iterate=PractitionerRole:organization&_include:iterate=PractitionerRole:practitioner&_revinclude=Task:focus&_revinclude=DiagnosticReport:subject&_sort=-authored&_count=100`
+      // Step 1: Find accepted Tasks where this practitioner is the owner
+      const taskBundle = await fhirGet(
+        `Task?status=accepted&owner=Practitioner/${practitionerId}&_include=Task:focus&_include=Task:patient&_sort=-_lastUpdated&_count=100`
       );
 
-      const all = dedupeResources(bundle);
+      const all = dedupeResources(taskBundle);
+      const tasks = all.filter((r) => r.resourceType === "Task");
       const srs = all.filter((r) => r.resourceType === "ServiceRequest");
+      const patients = all.filter((r) => r.resourceType === "Patient");
 
-      const patientById = new Map<string, any>(
-        all.filter((r) => r.resourceType === "Patient").map((p) => [p.id, p])
-      );
-      const orgById = new Map<string, any>(
-        all.filter((r) => r.resourceType === "Organization").map((o) => [o.id, o])
-      );
-      const roleById = new Map<string, any>(
-        all.filter((r) => r.resourceType === "PractitionerRole").map((role) => [role.id, role])
-      );
-      const tasksBySrId = new Map<string, any[]>();
-      for (const t of all.filter((r) => r.resourceType === "Task")) {
-        const srId = refId(t.focus?.reference || "");
-        if (srId) {
-          if (!tasksBySrId.has(srId)) tasksBySrId.set(srId, []);
-          tasksBySrId.get(srId)!.push(t);
+      const srById = new Map<string, any>(srs.map((sr) => [sr.id, sr]));
+      const patientById = new Map<string, any>(patients.map((p) => [p.id, p]));
+
+      // Step 2: Resolve requester / performer orgs for display
+      const orgIds = new Set<string>();
+      const roleIds = new Set<string>();
+      for (const sr of srs) {
+        for (const ref of [sr.requester?.reference, sr.performer?.[0]?.reference]) {
+          if (!ref) continue;
+          if (ref.includes("Organization/")) orgIds.add(refId(ref));
+          else if (ref.includes("PractitionerRole/")) roleIds.add(refId(ref));
         }
       }
 
-      const diagnosticReportsByEncounter = new Map<string, any[]>();
-      for (const dr of all.filter((r) => r.resourceType === "DiagnosticReport")) {
-        const encounterId = refId(dr.encounter?.reference || "");
-        if (encounterId) {
-          if (!diagnosticReportsByEncounter.has(encounterId)) diagnosticReportsByEncounter.set(encounterId, []);
-          diagnosticReportsByEncounter.get(encounterId)!.push(dr);
-        }
+      let orgById = new Map<string, any>();
+      let roleById = new Map<string, any>();
+
+      if (orgIds.size > 0 || roleIds.size > 0) {
+        const [orgBundle, roleBundle] = await Promise.all([
+          orgIds.size > 0
+            ? fhirGet(`Organization?_id=${Array.from(orgIds).join(",")}&_count=100`).catch(() => null)
+            : Promise.resolve(null),
+          roleIds.size > 0
+            ? fhirGet(`PractitionerRole?_id=${Array.from(roleIds).join(",")}&_include=PractitionerRole:organization&_count=100`).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+        const orgs = dedupeResources(orgBundle).filter((r) => r.resourceType === "Organization");
+        const roleAll = dedupeResources(roleBundle);
+        const roles = roleAll.filter((r) => r.resourceType === "PractitionerRole");
+        orgs.push(...roleAll.filter((r) => r.resourceType === "Organization"));
+        orgById = new Map(orgs.map((o) => [o.id, o]));
+        roleById = new Map(roles.map((r) => [r.id, r]));
       }
 
-      setItems(srs.map((sr) => {
-        const encounterId = refId(sr.encounter?.reference || "");
+      // Step 3: Build items from Tasks → focus ServiceRequest
+      setItems(tasks.map((task) => {
+        const srId = refId(task.focus?.reference || "");
+        const patientId = refId(task.for?.reference || "");
+        const sr = srById.get(srId) || null;
+        const patient = patientById.get(patientId) || null;
+        const encounterId = sr ? refId(sr.encounter?.reference || "") : "";
+
         return {
           sr,
-          task:    latestTask(tasksBySrId.get(sr.id) || []) || null,
-          patient: patientById.get(refId(sr.subject?.reference || "")) || null,
+          task,
+          patient,
           orgById,
           roleById,
-          diagnosticReports: encounterId ? (diagnosticReportsByEncounter.get(encounterId) || []) : [],
+          diagnosticReports: [],
         };
-      }));
+      }).filter((item) => item.sr !== null));
     } catch (e) {
       setError(e instanceof FhirError ? e.message : String(e));
     } finally { setLoading(false); }
@@ -179,7 +208,7 @@ export default function MyAssignedReferralsPage() {
     {
       id: "requestingOrg",
       header: "From",
-      accessorFn: (row: ReferralItem) => getRequestingOrganization(row),
+      accessorFn: (row: ReferralItem) => getPerformerOrganization(row),
       cell: (info: any) => info.getValue() || "—",
     },
     {
@@ -227,11 +256,11 @@ export default function MyAssignedReferralsPage() {
   if (!ready) return <div className="loading">Loading…</div>;
   if (!user) return null;
 
-  if (!orgId || !practitionerId) {
+  if (!practitionerId) {
     return (
       <>
         <AppPageHeader items={[{ label: "Home", href: "/" }, { label: "My Assigned Referrals" }]} title="My Assigned Referrals" />
-        <div className="alert err">No organization or practitioner linked to your account — contact an admin.</div>
+        <div className="alert err">No practitioner linked to your account — contact an admin.</div>
       </>
     );
   }
@@ -248,10 +277,7 @@ export default function MyAssignedReferralsPage() {
             <p className="incoming-header-sub">
               Referrals assigned to you{" "}
               <code style={{ background: "rgba(255,255,255,0.15)", padding: "1px 5px", borderRadius: 4, fontSize: 12 }}>
-                performer = Organization/{orgId}
-              </code>{" "}
-              <code style={{ background: "rgba(255,255,255,0.15)", padding: "1px 5px", borderRadius: 4, fontSize: 12 }}>
-                requester = Practitioner/{practitionerId}
+                Task.status = accepted · Task.owner = Practitioner/{practitionerId}
               </code>
             </p>
           </div>

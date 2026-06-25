@@ -6,7 +6,8 @@ import AppPageHeader from "@/components/AppPageHeader";
 import Pagination from "@/components/Pagination";
 import { useAuth } from "@/lib/auth";
 import { useSettings } from "@/lib/settings-context";
-import { humanName } from "@/lib/referral";
+import { humanName, getPatientIdentifier } from "@/lib/referral";
+import { fhirGet } from "@/lib/fhir";
 import {
   useReactTable,
   getCoreRowModel,
@@ -17,6 +18,27 @@ import {
 } from "@tanstack/react-table";
 
 type Row = { encounter: any; patient: any | null };
+
+const idVal = (res: any, kind: string) =>
+  (res?.identifier || []).find((i: any) => (i.system || "").includes(kind))?.value;
+
+function refId(ref: string): string {
+  return ref?.split("/").pop() || "";
+}
+
+function dedupeResources(bundle: any): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const e of bundle?.entry || []) {
+    const r = e.resource;
+    if (!r) continue;
+    const key = `${r.resourceType}/${r.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
 
 export default function ClinicalUpdateListPage() {
   const { user, ready } = useAuth();
@@ -35,14 +57,53 @@ export default function ClinicalUpdateListPage() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const PAGE_SIZE = 10;
 
+  // Referral matches: patient PhilHealth ID → ServiceRequest ID from My Assigned Referrals
+  const [referralMatches, setReferralMatches] = useState<Map<string, string>>(new Map());
+
   useEffect(() => {
     if (ready && user && !canAccess) router.replace("/");
   }, [ready, user, canAccess, router]);
 
   useEffect(() => {
-    if (ready && canAccess && orgId) load();
+    if (ready && canAccess && orgId) {
+      load();
+      loadReferralMatches();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, user, baseUrl, orgId]);
+
+  async function loadReferralMatches() {
+    if (!user?.practitionerId) return;
+    try {
+      const taskBundle = await fhirGet(
+        `Task?status=accepted&owner=Practitioner/${user.practitionerId}&_include=Task:focus&_include=Task:patient&_sort=-_lastUpdated&_count=100`,
+        baseUrl,
+      );
+
+      const all = dedupeResources(taskBundle);
+      const tasks = all.filter((r: any) => r.resourceType === "Task");
+      const srs = all.filter((r: any) => r.resourceType === "ServiceRequest");
+      const patients = all.filter((r: any) => r.resourceType === "Patient");
+
+      const srById = new Map<string, any>(srs.map((sr: any) => [sr.id, sr]));
+      const patientById = new Map<string, any>(patients.map((p: any) => [p.id, p]));
+
+      const matches = new Map<string, string>();
+      for (const task of tasks) {
+        const srId = refId(task.focus?.reference || "");
+        const patientId = refId(task.for?.reference || "");
+        const sr = srById.get(srId) || null;
+        const patient = patientById.get(patientId) || null;
+        if (sr && patient) {
+          const phId = getPatientIdentifier(patient, "philhealth") || getPatientIdentifier(patient, "philhealth-id");
+          if (phId) matches.set(phId, srId);
+        }
+      }
+      setReferralMatches(matches);
+    } catch {
+      // silently ignore — referral matching is optional
+    }
+  }
 
   useEffect(() => { setPage(1); }, [query]);
   useEffect(() => { setPage(1); }, [sorting]);
@@ -95,6 +156,24 @@ export default function ClinicalUpdateListPage() {
       cell: (info: any) => info.getValue(),
     },
     {
+      id: "philhealth",
+      header: "PhilHealth ID",
+      accessorFn: (row: Row) => idVal(row.patient, "philhealth-id") || "",
+      cell: (info: any) => {
+        const val = info.getValue();
+        if (!val) return "—";
+        const hasMatch = referralMatches.has(val);
+        return (
+          <span>
+            {val}
+            {hasMatch && (
+              <span className="badge accepted" style={{ marginLeft: 8, fontSize: 11, padding: "2px 8px" }}>from eReferral</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
       id: "encounter",
       header: "Encounter",
       accessorFn: (row: Row) => row.encounter?.id || "",
@@ -121,16 +200,7 @@ export default function ClinicalUpdateListPage() {
         return start ? new Date(start).toLocaleString() : "—";
       },
     },
-    {
-      id: "actions",
-      header: "Actions",
-      cell: (info: any) => (
-        <button onClick={(e: React.MouseEvent) => { e.stopPropagation(); router.push(`/clinical/profiling/${info.row.original.encounter.id}`); }}>
-          View / Update
-        </button>
-      ),
-    },
-  ], [router]);
+  ], [router, referralMatches]);
 
   const table = useReactTable({
     data: filtered,

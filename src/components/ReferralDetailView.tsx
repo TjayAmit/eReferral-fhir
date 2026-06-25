@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fhirGet, fhirPost, fhirPatch, FhirError } from "@/lib/fhir";
+import { fhirGet, fhirPost, FhirError } from "@/lib/fhir";
 import { buildNextTask, latestTask, humanName, formatAddress, firstPhone } from "@/lib/referral";
 import { useAuth } from "@/lib/auth";
 import TaskHistory from "./TaskHistory";
@@ -632,12 +632,28 @@ export default function ReferralDetailView({
       }
 
       // Receiving side: ServiceRequest.performer = Organization only;
-      // the receiving PractitionerRole / Practitioner are in Task.owner
+      // the receiving Practitioner / PractitionerRole are in Task.owner
       let performerRoleFromTask = task?.owner ? resolveRole(task.owner.reference || "") : null;
       let performerPractFromTask = task?.owner ? resolvePractitioner(task.owner.reference || "") : null;
       let performerOrgFromTask = task?.owner
         ? resolveOrg(task.owner.reference || "")
         : resolveOrg(sr.performer?.[0]?.reference || "");
+
+      // Handle direct Practitioner owner (Task.owner = Practitioner/{id})
+      if (task?.owner?.reference?.includes("Practitioner/") && !task.owner.reference.includes("PractitionerRole/")) {
+        const practId = refId(task.owner.reference);
+        performerPractFromTask = practitioners.find((p) => p.id === practId) || null;
+        if (!performerPractFromTask) {
+          try {
+            performerPractFromTask = await fhirGet(`Practitioner/${practId}`).catch(() => null);
+          } catch {
+            /* ignore */
+          }
+        }
+        // Organization stays on ServiceRequest.performer
+        performerOrgFromTask = resolveOrg(sr.performer?.[0]?.reference || "");
+        performerRoleFromTask = null;
+      }
 
       // Fallback: if _include:iterate didn't bring the receiving practitioner,
       // explicitly fetch the Task.owner role + linked org + practitioner.
@@ -843,6 +859,13 @@ export default function ReferralDetailView({
 
   async function handleRegisterPatient() {
     if (!detail?.patient) return;
+
+    const practitionerToAssign = assignToMe ? user?.practitioner : selectedPractitioner;
+    if (!practitionerToAssign) {
+      setRegisterError("Please select a physician or check 'Assign to me'");
+      return;
+    }
+
     setRegisteringPatient(true);
     setRegisterError(null);
     setNotice(null);
@@ -867,25 +890,21 @@ export default function ReferralDetailView({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to register patient");
 
-      // Determine practitioner to assign
-      const practitionerToAssign = assignToMe ? user?.practitioner : selectedPractitioner;
-
-      // Update ServiceRequest requester via JSON Patch
-      if (practitionerToAssign && sr?.id) {
-        await fhirPatch("ServiceRequest", sr.id, [
-          {
-            op: "replace",
-            path: "/requester",
-            value: {
-              reference: `Practitioner/${practitionerToAssign.id}`,
-              display: practitionerToAssign.name?.[0]?.text || practitionerToAssign.id
-            }
-          }
-        ]);
+      // Create acceptance Task with the selected Practitioner as owner
+      if (activeTask) {
+        const owner = {
+          reference: `Practitioner/${practitionerToAssign.id}`,
+          display: practitionerToAssign.name?.[0]?.text || practitionerToAssign.id,
+        };
+        const newTask = buildNextTask(activeTask, "accepted", undefined, owner);
+        const updated = await fhirPost("Task", newTask);
+        onChanged?.(updated);
       }
 
       setRegisterModalOpen(false);
-      setNotice(`Patient registered successfully${philhealthId ? " (PhilHealth: " + philhealthId + ")" : ""}${philsysId ? " (PhilSys: " + philsysId + ")" : ""}${practitionerToAssign ? " and assigned to " + practitionerToAssign.name?.[0]?.text : ""}`);
+      setNotice(
+        `Referral accepted & patient registered${philhealthId ? " (PhilHealth: " + philhealthId + ")" : ""}${philsysId ? " (PhilSys: " + philsysId + ")" : ""}. Assigned to ${practitionerToAssign.name?.[0]?.text || practitionerToAssign.id}`
+      );
       retrieve();
     } catch (err) {
       setRegisterError(err instanceof Error ? err.message : String(err));
@@ -912,15 +931,6 @@ export default function ReferralDetailView({
             <span className={`badge ${status}`} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999 }}>{status}</span>
           </div>
           <div className="incoming-header-actions">
-            {(status === "accepted" || status === "completed") && !sr?.requester?.reference?.includes("Practitioner") && (
-              <button
-                className="action-primary"
-                onClick={openRegisterModal}
-                disabled={registeringPatient}
-              >
-                {registeringPatient ? "Adding…" : "Add to Patient Registry"}
-              </button>
-            )}
             {showLabUpload && (
               <button
                 className="action-primary"
@@ -934,8 +944,14 @@ export default function ReferralDetailView({
               <button
                 key={a.status}
                 className={a.variant === "danger" ? "action-danger" : a.variant === "primary" ? "action-primary" : ""}
-                onClick={() => applyAction(a.status, a.note)}
-                disabled={!!busy}
+                onClick={() => {
+                  if (status === "received" && a.status === "accepted") {
+                    openRegisterModal();
+                  } else {
+                    applyAction(a.status, a.note);
+                  }
+                }}
+                disabled={!!busy || (status === "received" && a.status === "accepted" && registeringPatient)}
               >
                 {busy === a.status ? "…" : a.label}
               </button>
@@ -1101,7 +1117,7 @@ export default function ReferralDetailView({
             boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
           }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#111827" }}>Save Patient to EMR</h2>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#111827" }}>Accept Referral & Register Patient</h2>
               <button
                 onClick={() => setRegisterModalOpen(false)}
                 style={{
@@ -1118,7 +1134,7 @@ export default function ReferralDetailView({
               </button>
             </div>
             <p className="muted" style={{ marginBottom: 24, lineHeight: 1.5, color: "#6b7280" }}>
-              Register the patient to your system and assign a physician to review this referral.
+              Accept the referral, register the patient to your system, and assign a physician as the Task owner.
             </p>
 
             <div style={{ marginBottom: 24 }}>
@@ -1250,7 +1266,7 @@ export default function ReferralDetailView({
                   opacity: registeringPatient ? 0.7 : 1,
                 }}
               >
-                {registeringPatient ? "Adding..." : "Add & Assign"}
+                {registeringPatient ? "Accepting..." : "Accept & Register"}
               </button>
             </div>
           </div>

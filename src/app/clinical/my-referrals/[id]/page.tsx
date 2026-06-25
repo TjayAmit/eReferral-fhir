@@ -16,10 +16,17 @@ export default function MyAssignedReferralDetailPage() {
   const [sr, setSr] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showBack, setShowBack] = useState(false);
 
   useEffect(() => {
     if (ready && !user) router.replace("/login");
   }, [ready, user, router]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined" && document.referrer.includes("/clinical/profiling")) {
+      setShowBack(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (ready && user && serviceRequestId) load();
@@ -54,6 +61,13 @@ export default function MyAssignedReferralDetailPage() {
           { label: refId },
         ]}
         title={`Referral: ${refId}`}
+        actions={
+          showBack && (
+            <button className="ghost" onClick={() => router.back()}>
+              ← Back
+            </button>
+          )
+        }
       />
 
       {loading && !sr && <div className="loading">Loading referral…</div>}

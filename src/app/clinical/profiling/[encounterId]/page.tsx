@@ -5,7 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import AppPageHeader from "@/components/AppPageHeader";
 import { useAuth } from "@/lib/auth";
 import { useSettings } from "@/lib/settings-context";
-import { humanName, formatAddress, firstPhone } from "@/lib/referral";
+import { humanName, formatAddress, firstPhone, getPatientIdentifier } from "@/lib/referral";
+import { fhirGet } from "@/lib/fhir";
 import { buildClinicalBundle } from "@/lib/clinical-assessment";
 import { DEMO_CLINICAL } from "@/lib/demo-data";
 import { DISPOSITIONS, applyDisposition, withEncounterStatus, type Disposition } from "@/lib/disposition";
@@ -19,10 +20,29 @@ type Detail = {
   procedures: any[];
   diagnosticReports?: any[];
   tasks?: any[];
+  serviceRequests?: any[];
 };
 
 const idVal = (res: any, kind: string) =>
   (res?.identifier || []).find((i: any) => (i.system || "").includes(kind))?.value;
+
+function refId(ref: string): string {
+  return ref?.split("/").pop() || "";
+}
+
+function dedupeResources(bundle: any): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const e of bundle?.entry || []) {
+    const r = e.resource;
+    if (!r) continue;
+    const key = `${r.resourceType}/${r.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
 
 const LOINC_NAME: Record<string, string> = {
   "85354-9": "Blood Pressure", "8867-4": "Heart Rate", "9279-1": "Respiratory Rate",
@@ -74,6 +94,8 @@ export default function ClinicalUpdateViewPage() {
   const [disposing, setDisposing] = useState<string | null>(null);
   const [dispError, setDispError] = useState<string | null>(null);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
+  // Referral matches: patient PhilHealth ID → ServiceRequest ID from My Assigned Referrals
+  const [referralMatches, setReferralMatches] = useState<Map<string, string>>(new Map());
   const [registeringPatient, setRegisteringPatient] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [existingIds, setExistingIds] = useState({
@@ -88,9 +110,45 @@ export default function ClinicalUpdateViewPage() {
   }, [ready, user, canAccess, router]);
 
   useEffect(() => {
-    if (ready && canAccess) load();
+    if (ready && canAccess) {
+      load();
+      loadReferralMatches();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, user, baseUrl, encounterId]);
+
+  async function loadReferralMatches() {
+    if (!user?.practitionerId) return;
+    try {
+      const taskBundle = await fhirGet(
+        `Task?status=accepted&owner=Practitioner/${user.practitionerId}&_include=Task:focus&_include=Task:patient&_sort=-_lastUpdated&_count=100`,
+        baseUrl,
+      );
+
+      const all = dedupeResources(taskBundle);
+      const tasks = all.filter((r: any) => r.resourceType === "Task");
+      const srs = all.filter((r: any) => r.resourceType === "ServiceRequest");
+      const patients = all.filter((r: any) => r.resourceType === "Patient");
+
+      const srById = new Map<string, any>(srs.map((sr: any) => [sr.id, sr]));
+      const patientById = new Map<string, any>(patients.map((p: any) => [p.id, p]));
+
+      const matches = new Map<string, string>();
+      for (const task of tasks) {
+        const srId = refId(task.focus?.reference || "");
+        const patientId = refId(task.for?.reference || "");
+        const sr = srById.get(srId) || null;
+        const patient = patientById.get(patientId) || null;
+        if (sr && patient) {
+          const phId = getPatientIdentifier(patient, "philhealth") || getPatientIdentifier(patient, "philhealth-id");
+          if (phId) matches.set(phId, srId);
+        }
+      }
+      setReferralMatches(matches);
+    } catch {
+      // silently ignore — referral matching is optional
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -127,22 +185,27 @@ export default function ClinicalUpdateViewPage() {
       labTitle: dr?.presentedForm?.[0]?.title || dr?.code?.text || "",
       labConclusion: dr?.conclusion || "",
     };
+
     setExistingIds({
       chiefConditionId: chief?.id || "",
       dxConditionId: dx?.id || "",
       procedureId: proc?.id || "",
       diagnosticReportId: dr?.id || "",
     });
+
     const hasAny = Object.values(fromServer).some(Boolean);
     setCu(!hasAny && useDemoData ? { ...DEMO_CLINICAL } : fromServer);
   }
 
   async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
+    e.preventDefault(); 
+
     if (!detail?.patient?.id) return;
+
     setSaving(true);
     setSaveError(null);
     setNotice(null);
+    
     try {
       const bundle = buildClinicalBundle({
         patientId: detail.patient.id,
@@ -194,9 +257,11 @@ export default function ClinicalUpdateViewPage() {
   // Register patient from incoming referral
   async function handleRegisterPatient() {
     if (!detail?.patient) return;
+
     setRegisteringPatient(true);
     setRegisterError(null);
     setNotice(null);
+
     try {
       const hdrs = { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl };
       const patient = detail.patient;
@@ -245,6 +310,7 @@ export default function ClinicalUpdateViewPage() {
     try {
       const hdrs = { "Content-Type": "application/json", "X-FHIR-Base-Url": baseUrl };
       const note = transferPayload?.note;
+      const serviceType = transferPayload?.serviceType;
       const { er, inpatient } = applyDisposition(detail.encounter, detail.patient.id, choice, new Date().toISOString(), note);
 
       // Admit: create the inpatient encounter FIRST so a failure never leaves the
@@ -277,6 +343,7 @@ export default function ClinicalUpdateViewPage() {
           status: "draft",
           intent: "order",
           category: [{ coding: [{ system: "http://snomed.info/sct", code: "73770003", display: "Hospital-based outpatient emergency care center" }], text: "Emergency" }],
+          reasonCode: serviceType ? [{ coding: [{ system: serviceType.system, code: serviceType.code, display: serviceType.display }] }] : undefined,
           subject: { reference: `Patient/${detail.patient.id}` },
           encounter: { reference: `Encounter/${detail.encounter.id}` },
           authoredOn: new Date().toISOString(),
@@ -323,6 +390,11 @@ export default function ClinicalUpdateViewPage() {
   // Clinical data already recorded on this encounter?
   const hasClinicalData = (detail?.conditions?.length || 0) > 0 || (detail?.procedures?.length || 0) > 0;
 
+  // eReferral detection via My Assigned Referrals
+  const philhealthId = getPatientIdentifier(patient, "philhealth-id");
+  const hasReferral = philhealthId ? referralMatches.has(philhealthId) : false;
+  const serviceRequestId = hasReferral ? referralMatches.get(philhealthId!) : "";
+
   // Check if there's a task with status = "accepted" or "completed"
   const hasAcceptedTask = (detail?.tasks || []).some((t: any) => t.status === "accepted" || t.status === "completed");
 
@@ -337,10 +409,26 @@ export default function ClinicalUpdateViewPage() {
         title={`Patient Vitals Encounter — ${patient ? humanName(patient.name) : encounterId}`}
         actions={
           enc && (
-            <span className="badge" style={{ background: "var(--brand)", color: "#fff" }}>
-              {(enc.class?.display || enc.type?.[0]?.coding?.[0]?.display || "Encounter")
-                .replace(/^\w/, (c: string) => c.toUpperCase())}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span className="badge" style={{ background: "var(--brand)", color: "#fff" }}>
+                {(enc.class?.display || enc.type?.[0]?.coding?.[0]?.display || "Encounter")
+                  .replace(/^\w/, (c: string) => c.toUpperCase())}
+              </span>
+              {hasReferral && (
+                <button
+                  className="action-primary"
+                  onClick={() => router.push(`/clinical/my-referrals/${serviceRequestId}`)}
+                  style={{ fontSize: 12, padding: "4px 12px" }}
+                >
+                  Review Referral
+                </button>
+              )}
+              {hasReferral && philhealthId && (
+                <span className="badge accepted" style={{ fontSize: 11, padding: "2px 8px" }}>
+                  From Referral
+                </span>
+              )}
+            </div>
           )
         }
       />
@@ -355,25 +443,6 @@ export default function ClinicalUpdateViewPage() {
             {notice && <div className="alert ok">✅ {notice}</div>}
             {saveError && <div className="alert err">❌ {saveError}</div>}
             {registerError && <div className="alert err">❌ {registerError}</div>}
-
-            {hasAcceptedTask && (
-              <div className="card" style={{ marginBottom: 16 }}>
-                <div className="section-header">
-                  <div className="section-title-wrap"><span className="section-indicator" /><h2 className="section-title">Incoming Referral</h2></div>
-                  <span className="badge accepted">Accepted</span>
-                </div>
-                <p className="muted" style={{ marginTop: -4, marginBottom: 10 }}>
-                  This encounter has an accepted incoming referral. Register the patient data to your system.
-                </p>
-                <button
-                  className="action-primary"
-                  onClick={handleRegisterPatient}
-                  disabled={registeringPatient}
-                >
-                  {registeringPatient ? "Adding…" : "Add to Patient Registry"}
-                </button>
-              </div>
-            )}
 
             {!isEditing && hasClinicalData ? (
               <>

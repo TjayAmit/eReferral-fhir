@@ -78,22 +78,41 @@ export async function GET(request: NextRequest) {
 
     // ── VIEW a single encounter ─────────────────────────────────────────
     if (encounter) {
-      const [encBundle, condBundle, procBundle, drBundle, taskBundle] = await Promise.all([
-        fhirGet(`Encounter?_id=${encounter}&_include=Encounter:subject&_revinclude=Observation:encounter`, baseUrl),
+      // Step 1: get encounter + patient + observations
+      const encBundle = await fhirGet(
+        `Encounter?_id=${encounter}&_include=Encounter:subject&_revinclude=Observation:encounter`,
+        baseUrl,
+      );
+      const all = collect(encBundle);
+      const patient = all.find((r: any) => r.resourceType === 'Patient');
+      const patientId = patient?.id;
+
+      // Step 2: fetch ServiceRequests by patient subject (more reliable than _revinclude)
+      let serviceRequests: any[] = [];
+      if (patientId) {
+        const srBundle = await fhirGet(`ServiceRequest?subject=Patient/${patientId}&_count=50`, baseUrl).catch(() => null);
+        serviceRequests = srBundle ? collect(srBundle).filter((r: any) => r.resourceType === 'ServiceRequest') : [];
+      }
+      const srId = serviceRequests[0]?.id;
+
+      // Step 3: fetch related resources; tasks by focus=ServiceRequest since
+      // acceptance Tasks don't carry an encounter reference.
+      const [condBundle, procBundle, drBundle, taskBundle] = await Promise.all([
         fhirGet(`Condition?encounter=Encounter/${encounter}&_count=50`, baseUrl),
         fhirGet(`Procedure?encounter=Encounter/${encounter}&_count=50`, baseUrl),
         fhirGet(`DiagnosticReport?encounter=Encounter/${encounter}&_count=50`, baseUrl),
-        fhirGet(`Task?encounter=Encounter/${encounter}&_count=50`, baseUrl),
+        srId ? fhirGet(`Task?focus=ServiceRequest/${srId}&_count=50`, baseUrl) : Promise.resolve(null),
       ]);
-      const all = collect(encBundle);
+
       return NextResponse.json({
         encounter: all.find((r: any) => r.resourceType === 'Encounter') || null,
-        patient: all.find((r: any) => r.resourceType === 'Patient') || null,
+        patient: patient || null,
         observations: all.filter((r: any) => r.resourceType === 'Observation'),
         conditions: collect(condBundle),
         procedures: collect(procBundle),
         diagnosticReports: collect(drBundle),
-        tasks: collect(taskBundle),
+        tasks: taskBundle ? collect(taskBundle) : [],
+        serviceRequests,
       });
     }
 

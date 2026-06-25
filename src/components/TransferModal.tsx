@@ -1,23 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Modal from "./Modal";
+import { expandValueSet } from "@/lib/fhir";
 
-export const TRANSFER_SERVICE_TYPES = [
-  { code: "71388002", display: "Procedure" },
-  { code: "386661006", display: "Fever" },
-  { code: "422587007", display: "Nausea" },
-  { code: "267038003", display: "Edema" },
-  { code: "301717006", display: "Hypertensive disorder" },
-  { code: "398254007", display: "Pre-eclampsia" },
-  { code: "14094001", display: "Severe pre-eclampsia" },
-  { code: "16114001", display: "Fetal distress" },
-  { code: "48782003", display: "Diabetes mellitus" },
-  { code: "38341003", display: "Hypertension" },
+const REASON_FOR_REFERRAL_VS =
+  "https://www.fhir.doh.gov.ph/pheref/ValueSet/reason-for-referral-service-type";
+
+const FALLBACK_SERVICE_TYPES = [
+  { code: "11429006", display: "Consultation", system: "http://snomed.info/sct" },
+  { code: "165197003", display: "Diagnostics", system: "http://snomed.info/sct" },
+  { code: "71388002", display: "Procedure", system: "http://snomed.info/sct" },
+  { code: "3457005", display: "Others", system: "http://snomed.info/sct" },
 ];
 
+export type ServiceTypeOption = { code: string; display: string; system: string };
+
 export type TransferPayload = {
-  serviceType: { code: string; display: string };
+  serviceType: ServiceTypeOption;
   note: string;
 };
 
@@ -32,20 +32,53 @@ export default function TransferModal({
   onConfirm: (payload: TransferPayload) => void;
   disabled?: boolean;
 }) {
-  const [serviceTypeCode, setServiceTypeCode] = useState(TRANSFER_SERVICE_TYPES[0].code);
+  const [serviceTypes, setServiceTypes] = useState<ServiceTypeOption[]>(FALLBACK_SERVICE_TYPES);
+  const [serviceTypeCode, setServiceTypeCode] = useState<string>(FALLBACK_SERVICE_TYPES[0].code);
   const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [typesError, setTypesError] = useState<string | null>(null);
 
-  const selectedType = TRANSFER_SERVICE_TYPES.find((t) => t.code === serviceTypeCode) || TRANSFER_SERVICE_TYPES[0];
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setLoading(true);
+    setTypesError(null);
+    expandValueSet(REASON_FOR_REFERRAL_VS)
+      .then((data) => {
+        if (cancelled) return;
+        const concepts: any[] = data?.expansion?.contains || [];
+        if (concepts.length > 0) {
+          const mapped = concepts.map((c: any) => ({
+            code: String(c.code),
+            display: String(c.display || c.code),
+            system: String(c.system || "http://snomed.info/sct"),
+          }));
+          setServiceTypes(mapped);
+          setServiceTypeCode(mapped[0].code);
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setTypesError(err instanceof Error ? err.message : String(err));
+        // Keep fallback values already in state
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
+  const selectedType = serviceTypes.find((t) => t.code === serviceTypeCode) || serviceTypes[0];
 
   function handleConfirm(e: React.FormEvent) {
     e.preventDefault();
     onConfirm({ serviceType: selectedType, note: note.trim() });
-    setServiceTypeCode(TRANSFER_SERVICE_TYPES[0].code);
+    setServiceTypeCode(serviceTypes[0]?.code || FALLBACK_SERVICE_TYPES[0].code);
     setNote("");
   }
 
   function handleClose() {
-    setServiceTypeCode(TRANSFER_SERVICE_TYPES[0].code);
+    setServiceTypeCode(serviceTypes[0]?.code || FALLBACK_SERVICE_TYPES[0].code);
     setNote("");
     onClose();
   }
@@ -55,12 +88,18 @@ export default function TransferModal({
       <form onSubmit={handleConfirm}>
         <div className="field">
           <label htmlFor="transfer-service-type">Reason for referral (service type)</label>
+          {typesError && (
+            <p className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+              Could not load ValueSet — using fallback codes.
+            </p>
+          )}
           <select
             id="transfer-service-type"
             value={serviceTypeCode}
             onChange={(e) => setServiceTypeCode(e.target.value)}
+            disabled={loading || disabled}
           >
-            {TRANSFER_SERVICE_TYPES.map((t) => (
+            {serviceTypes.map((t) => (
               <option key={t.code} value={t.code}>
                 {t.display}
               </option>

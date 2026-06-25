@@ -406,8 +406,80 @@ export function latestTask(tasks: any[]): any | null {
   )[0];
 }
 
-/** Build a new Task for the next status, preserving references. */
-export function buildNextTask(prev: any, status: string, reason?: string): any {
+export function getPatientIdentifier(patient: any, systemContains: string): string | undefined {
+  return (patient?.identifier || [])
+    .find((i: any) => (i.system || "").includes(systemContains))?.value;
+}
+
+/** Detect whether a patient/encounter originates from an eReferral.
+ *  Validates that the referral has an accepted Task owned by the logged practitioner
+ *  and the patient PhilHealth ID matches between referral and encounter. */
+export function isFromReferral(
+  patient: any,
+  serviceRequests?: any[],
+  tasks?: any[],
+  practitionerId?: string
+): boolean {
+  const patientPhId = getPatientIdentifier(patient, "philhealth");
+  if (!patientPhId) return false;
+
+  const srs = serviceRequests || [];
+  const taskList = tasks || [];
+
+  return srs.some((sr: any) => {
+    const srPatientPhId = getPatientIdentifier(sr?.subject?.patient, "philhealth");
+    if (srPatientPhId && srPatientPhId !== patientPhId) return false;
+
+    const srId = sr?.id;
+    if (!srId) return false;
+
+    return taskList.some((t: any) => {
+      if (t.status !== "accepted" && t.status !== "completed") return false;
+      const taskOwnerRef = t.owner?.reference || "";
+      const isOwnedByPractitioner = practitionerId
+        ? taskOwnerRef === `Practitioner/${practitionerId}`
+        : true;
+      const taskFocusSrId = t.focus?.reference?.split("/").pop();
+      return isOwnedByPractitioner && taskFocusSrId === srId;
+    });
+  });
+}
+
+/** Get the ServiceRequest id to link to for review, if any.
+ *  Only returns an ID when there's a validated accepted referral
+ *  (Task owned by the logged practitioner, patient PhilHealth matches). */
+export function getReviewServiceRequestId(detail: any, practitionerId?: string): string {
+  const patientPhId = getPatientIdentifier(detail?.patient, "philhealth");
+  const srs = detail?.serviceRequests || [];
+  const tasks = detail?.tasks || [];
+
+  for (const sr of srs) {
+    const srId = sr?.id;
+    if (!srId) continue;
+
+    const hasAcceptedTask = tasks.some((t: any) => {
+      if (t.status !== "accepted" && t.status !== "completed") return false;
+      const taskOwnerRef = t.owner?.reference || "";
+      const isOwnedByPractitioner = practitionerId
+        ? taskOwnerRef === `Practitioner/${practitionerId}`
+        : true;
+      const taskFocusSrId = t.focus?.reference?.split("/").pop();
+      return isOwnedByPractitioner && taskFocusSrId === srId;
+    });
+
+    if (hasAcceptedTask) return srId;
+  }
+
+  // Fallback: try to derive from accepted task focus
+  const acceptedTask = tasks.find(
+    (t: any) => (t.status === "accepted" || t.status === "completed")
+  );
+  return acceptedTask?.focus?.reference?.split("/").pop() || "";
+}
+
+/** Build a new Task for the next status, preserving references.
+ *  Optionally override the owner (e.g. set a Practitioner on acceptance). */
+export function buildNextTask(prev: any, status: string, reason?: string, owner?: any): any {
   const now = new Date().toISOString();
   return {
     resourceType: "Task",
@@ -420,7 +492,7 @@ export function buildNextTask(prev: any, status: string, reason?: string): any {
     authoredOn: now,
     lastModified: now,
     requester: prev.requester,
-    owner: prev.owner,
+    owner: owner ?? prev.owner,
     note: reason ? [{ text: reason }] : prev.note,
   };
 }
